@@ -23,7 +23,11 @@ module.exports = class Configuration {
     constructor(configuration) {
         let options = configuration || {};
         let applicationExecutableDirectory = path.dirname(electron.app.getPath('exe'));
-        this._applicationUpdateURL = options['applicationUpdateURL'] || 'https://manga-download.github.io/hakuneko/6.1.7/latest';
+        // This custom fork ships its web application inside the portable archive.
+        // Disable the upstream signed web updater by default so the bundled custom
+        // web cache is not replaced with manga-download/hakuneko's stock 6.1.7 web app.
+        // A custom update URL can still be supplied explicitly through --update-url.
+        this._applicationUpdateURL = options['applicationUpdateURL'] || 'DISABLED';
         this._applicationStartupURL = options['applicationStartupURL'] || 'hakuneko://cache/index.html';
         this._applicationCacheDirectory = options['applicationCacheDirectory'] || path.join(applicationExecutableDirectory, 'cache');
         this._applicationUserDataDirectory = options['applicationUserDataDirectory'] || path.join(applicationExecutableDirectory, 'userdata');
