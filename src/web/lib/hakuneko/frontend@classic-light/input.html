@@ -21,6 +21,18 @@
             .shrink {
                 flex: 0;
             }
+            .range-wrap {
+                display: flex;
+                align-items: center;
+                gap: 0.5em;
+            }
+            .range-wrap input[type="range"] {
+                flex: 1;
+            }
+            .range-value {
+                min-width: 2em;
+                text-align: center;
+            }
             /* workaround for vertical center of fa icons */
             .shrink:before {
                 content: "";
@@ -52,6 +64,12 @@
         <template is="dom-if" if="[[ isInputType(item.input, inputTypes.numeric) ]]" restamp="false">
             <div class="stretch">
                 <input type="number" min="[[ item.min ]]" max="[[ item.max ]]" value="{{ item.value::change }}"/>
+            </div>
+        </template>
+        <template is="dom-if" if="[[ isInputType(item.input, inputTypes.range) ]]" restamp="false">
+            <div class="stretch range-wrap">
+                <input type="range" min="[[ item.min ]]" max="[[ item.max ]]" step="[[ item.step ]]" value="{{ item.value::input }}"/>
+                <span class="range-value">[[ item.value ]]</span>
             </div>
         </template>
         <template is="dom-if" if="[[ isInputType(item.input, inputTypes.select) ]]" restamp="false">
@@ -89,38 +107,28 @@
     <script>
         /** @polymerElement */
         class HakunekoInput extends Polymer.Element {
-            /**
-             *
-             */
             static get is() {
                 return 'hakuneko-input';
             }
 
-            /**
-             *
-             */
             static get properties() {
                 return {
                     item: {
                         type: Object,
                         value: undefined,
-                        notify: true, // enable upward data flow,
-                        //readOnly: true, // prevent downward data flow
+                        notify: true,
                     }
                 };
             }
 
-            /**
-             *
-             */
             ready() {
                 super.ready();
-                //
                 this.inputTypes = {
                     disabled: 'disabled',
                     text: 'text',
                     password: 'password',
                     numeric: 'numeric',
+                    range: 'range',
                     select: 'select',
                     checkbox: 'checkbox',
                     file: 'file',
@@ -128,29 +136,18 @@
                 };
             }
 
-            /**
-             *
-             */
             isInputType( inputType, expectedType ) {
                 return ( inputType === expectedType );
             }
 
-            /**
-             *
-             */
             isSelected(selected, option){
                 return ( selected === option );
             }
-            /**
-             *
-             */
+
             clickChooseFile( e ) {
                 console.log( this.item );
             }
 
-            /**
-             *
-             */
             async clickChooseDirectory(evt) {
                 let path = await Engine.Storage.folderBrowser(this.item.value);
                 if(path) {
