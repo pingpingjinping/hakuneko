@@ -20,11 +20,11 @@ export default class BookmarkUpdateManager extends EventTarget {
 
     async checkForUpdates() {
         if(this._running) {
-            return { checked: 0, updated: 0, korean: 0, queued: 0, failed: 0 };
+            return this._emptyResult();
         }
 
         this._running = true;
-        let result = { checked: 0, updated: 0, korean: 0, queued: 0, failed: 0 };
+        let result = this._emptyResult();
 
         try {
             let state = await this._loadState();
@@ -42,8 +42,15 @@ export default class BookmarkUpdateManager extends EventTarget {
                     if(update.newChapterCount > 0) {
                         result.updated++;
                     }
+                    result.online += update.onlineChapterCount;
+                    result.koreanTotal += update.koreanTotalCount;
                     result.korean += update.koreanChapterCount;
                     result.queued += update.queuedCount;
+                    for(let value of update.languageValues) {
+                        if(result.languages.indexOf(value) < 0 && result.languages.length < 12) {
+                            result.languages.push(value);
+                        }
+                    }
                 } catch(error) {
                     result.failed++;
                     console.warn('Failed to check bookmark for updates:', bookmark, error);
@@ -56,17 +63,32 @@ export default class BookmarkUpdateManager extends EventTarget {
                         total: bookmarks.length,
                         title: bookmark.title && bookmark.title.manga ? bookmark.title.manga : '',
                         connector: bookmark.title && bookmark.title.connector ? bookmark.title.connector : '',
-                        result: Object.assign({}, result)
+                        result: Object.assign({}, result, { languages: result.languages.slice() })
                     }
                 }));
             }
 
             await this._storage.saveConfig(stateKey, state, 2);
-            this.dispatchEvent(new CustomEvent('finished', { detail: result }));
+            this.dispatchEvent(new CustomEvent('finished', {
+                detail: Object.assign({}, result, { languages: result.languages.slice() })
+            }));
             return result;
         } finally {
             this._running = false;
         }
+    }
+
+    _emptyResult() {
+        return {
+            checked: 0,
+            updated: 0,
+            online: 0,
+            koreanTotal: 0,
+            korean: 0,
+            queued: 0,
+            failed: 0,
+            languages: []
+        };
     }
 
     async _checkBookmark(bookmark, state) {
@@ -91,14 +113,26 @@ export default class BookmarkUpdateManager extends EventTarget {
             ? onlineChapters.filter(chapter => !known.has(String(chapter.id)))
             : [];
 
-        // Download policy: every Korean chapter that is not present on disk is eligible.
-        // This intentionally does not depend on the update baseline. If an earlier scan saw a
-        // chapter but it was not downloaded, the next scan will still queue it again.
-        let missingKoreanChapters = onlineChapters.filter(chapter => {
-            return chapter.status === 'available' && this._isKoreanChapter(chapter);
-        });
-        let queuedCount = 0;
+        let koreanChapters = onlineChapters.filter(chapter => this._isKoreanChapter(chapter));
+        let missingKoreanChapters = koreanChapters.filter(chapter => chapter.status === 'available');
+        let languageValues = [];
 
+        for(let chapter of onlineChapters) {
+            let values = this._languageStrings(chapter.language);
+            if(values.length === 0) {
+                if(languageValues.indexOf('(없음)') < 0) {
+                    languageValues.push('(없음)');
+                }
+            } else {
+                for(let value of values) {
+                    if(languageValues.indexOf(value) < 0 && languageValues.length < 8) {
+                        languageValues.push(value);
+                    }
+                }
+            }
+        }
+
+        let queuedCount = 0;
         if(this._settings.autoDownloadBookmarkUpdates.value) {
             for(let chapter of missingKoreanChapters) {
                 this._downloadManager.addDownload(chapter);
@@ -115,38 +149,65 @@ export default class BookmarkUpdateManager extends EventTarget {
 
         return {
             newChapterCount: newChapters.length,
+            onlineChapterCount: onlineChapters.length,
+            koreanTotalCount: koreanChapters.length,
             koreanChapterCount: missingKoreanChapters.length,
-            queuedCount: queuedCount
+            queuedCount: queuedCount,
+            languageValues: languageValues
         };
     }
 
     _isKoreanChapter(chapter) {
-        let language = chapter.language;
-        let value = '';
-
-        if(typeof language === 'string' || typeof language === 'number') {
-            value = String(language).trim().toLowerCase();
-        } else if(language) {
-            for(let property of ['code', 'id', 'name', 'label', 'language']) {
-                if(language[property] !== undefined && language[property] !== null) {
-                    value = String(language[property]).trim().toLowerCase();
-                    break;
-                }
+        let values = this._languageStrings(chapter.language);
+        for(let value of values) {
+            let normalized = value.trim().toLowerCase().replace(/_/g, '-');
+            if(normalized.indexOf('🇰🇷') >= 0 || normalized.indexOf('korean') >= 0 || normalized.indexOf('한국') >= 0) {
+                return true;
+            }
+            if(/(^|[^a-z])(ko|kr|kor)([^a-z]|$)/i.test(normalized)) {
+                return true;
             }
         }
 
-        if(['ko', 'kr', 'kor', 'ko-kr', 'korean', '한국어', '한국'].includes(value)) {
-            return true;
+        // Some connectors do not expose a language value. Keep the fallback conservative so an
+        // unlabeled multi-language connector cannot accidentally queue every available chapter.
+        if(values.length === 0) {
+            let title = String(chapter.title || '').toLowerCase();
+            return title.indexOf('🇰🇷') >= 0 || title.indexOf('[kr]') >= 0 ||
+                title.indexOf('[kor]') >= 0 || title.indexOf('[korean]') >= 0 ||
+                title.indexOf('[한국어]') >= 0 || title.indexOf('(kr)') >= 0 ||
+                title.indexOf('(kor)') >= 0 || title.indexOf('(korean)') >= 0 ||
+                title.indexOf('(한국어)') >= 0;
         }
 
-        if(value) {
-            return false;
-        }
+        return false;
+    }
 
-        let title = String(chapter.title || '').toLowerCase();
-        return title.includes('[kr]') || title.includes('[kor]') || title.includes('[korean]') ||
-            title.includes('[한국어]') || title.includes('(kr)') || title.includes('(korean)') ||
-            title.includes('(한국어)');
+    _languageStrings(language) {
+        let values = [];
+        let add = value => {
+            if(value === undefined || value === null) {
+                return;
+            }
+            if(Array.isArray(value)) {
+                value.forEach(add);
+                return;
+            }
+            if(typeof value === 'object') {
+                for(let property of ['code', 'id', 'name', 'label', 'language', 'value', 'title']) {
+                    if(value[property] !== undefined && value[property] !== null) {
+                        add(value[property]);
+                    }
+                }
+                return;
+            }
+            let text = String(value).trim();
+            if(text && values.indexOf(text) < 0) {
+                values.push(text);
+            }
+        };
+        add(language);
+        return values;
     }
 
     _getChapters(manga) {
