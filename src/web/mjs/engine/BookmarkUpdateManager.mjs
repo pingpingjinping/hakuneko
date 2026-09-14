@@ -29,6 +29,14 @@ export default class BookmarkUpdateManager extends EventTarget {
         try {
             let state = await this._loadState();
             let bookmarks = Array.from(this._bookmarkManager.bookmarks || []);
+            let processed = 0;
+
+            this.dispatchEvent(new CustomEvent('started', {
+                detail: {
+                    total: bookmarks.length,
+                    result: Object.assign({}, result)
+                }
+            }));
 
             // Process bookmarks sequentially. Some connectors rate-limit or internally lock requests,
             // and checking every bookmark in parallel can easily trip those protections.
@@ -44,6 +52,17 @@ export default class BookmarkUpdateManager extends EventTarget {
                     result.failed++;
                     console.warn('Failed to check bookmark for updates:', bookmark, error);
                 }
+
+                processed++;
+                this.dispatchEvent(new CustomEvent('progress', {
+                    detail: {
+                        current: processed,
+                        total: bookmarks.length,
+                        title: bookmark.title && bookmark.title.manga ? bookmark.title.manga : '',
+                        connector: bookmark.title && bookmark.title.connector ? bookmark.title.connector : '',
+                        result: Object.assign({}, result)
+                    }
+                }));
             }
 
             await this._storage.saveConfig(stateKey, state, 2);
