@@ -27,8 +27,27 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Build custom web application
+        run: npm run build:web
+
       - name: Build Windows packages
         run: npm run build:app
+
+      - name: Inject custom web cache into portable amd64 build
+        shell: pwsh
+        run: |
+          $portableDir = Get-ChildItem -Path build -Directory -Filter 'hakuneko-desktop_*_windows-portable_amd64' | Select-Object -First 1
+          if (-not $portableDir) { throw 'Portable amd64 build directory was not produced.' }
+          $cacheDir = Join-Path $portableDir.FullName 'cache'
+          if (Test-Path $cacheDir) { Remove-Item $cacheDir -Recurse -Force }
+          New-Item -ItemType Directory -Path $cacheDir | Out-Null
+          Copy-Item -Path 'build\web\*' -Destination $cacheDir -Recurse -Force
+
+          $zipPath = "$($portableDir.FullName).zip"
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Push-Location (Split-Path $portableDir.FullName -Parent)
+          7z a $zipPath ".\$($portableDir.Name)" | Out-Host
+          Pop-Location
 
       - name: Locate portable amd64 archive
         id: portable
@@ -47,13 +66,17 @@ jobs:
           ASSET: ${{ steps.portable.outputs.asset }}
         run: |
           $notes = @"
-          Custom HakuNeko 6.1.7 portable build from the 6.1.7 branch.
+          Custom HakuNeko 6.1.7 portable build.
 
           Added:
           - Check bookmarked manga for new chapters on startup
           - Automatically queue newly discovered chapters for download
           - First successful scan creates a baseline and does not download historical chapters
           - Update state is stored separately from the existing bookmark file
+          - Custom web app is bundled into the portable package
+          - Upstream web auto-update is disabled by default so the custom feature is not overwritten
+
+          Portable user data remains inside the package folder under `userdata`.
           "@
 
           gh release view $env:TAG --repo $env:GITHUB_REPOSITORY 2>$null
