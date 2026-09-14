@@ -2,6 +2,8 @@ import Manga from './Manga.mjs';
 
 const stateKey = 'bookmark-update-state';
 const stateVersion = 1;
+const refreshInterval = 12 * 60 * 60 * 1000;
+const parallelChecks = 3;
 
 export default class BookmarkUpdateManager extends EventTarget {
 
@@ -18,42 +20,59 @@ export default class BookmarkUpdateManager extends EventTarget {
         return this._running;
     }
 
-    async checkForUpdates() {
+    async checkForUpdates(options = {}) {
         if(this._running) {
             return this._emptyResult();
         }
 
         this._running = true;
         let result = this._emptyResult();
+        let force = !!(options && options.force);
 
         try {
             let state = await this._loadState();
             let bookmarks = Array.from(this._bookmarkManager.bookmarks || []);
             let processed = 0;
+            let nextIndex = 0;
 
             this.dispatchEvent(new CustomEvent('started', {
-                detail: { total: bookmarks.length, result: Object.assign({}, result) }
+                detail: {
+                    total: bookmarks.length,
+                    force: force,
+                    parallel: parallelChecks,
+                    refreshHours: 12,
+                    result: Object.assign({}, result)
+                }
             }));
 
-            for(let bookmark of bookmarks) {
-                try {
-                    let update = await this._checkBookmark(bookmark, state);
-                    result.checked++;
-                    if(update.newChapterCount > 0) {
-                        result.updated++;
-                    }
-                    result.online += update.onlineChapterCount;
-                    result.koreanTotal += update.koreanTotalCount;
-                    result.korean += update.koreanChapterCount;
-                    result.queued += update.queuedCount;
-                    for(let value of update.languageValues) {
-                        if(result.languages.indexOf(value) < 0 && result.languages.length < 12) {
-                            result.languages.push(value);
+            let processBookmark = async bookmark => {
+                let skipped = false;
+                let key = this._bookmarkKey(bookmark);
+                let previous = state.bookmarks[key];
+
+                if(!force && this._isFresh(previous)) {
+                    result.skipped++;
+                    skipped = true;
+                } else {
+                    try {
+                        let update = await this._checkBookmark(bookmark, state);
+                        result.checked++;
+                        if(update.newChapterCount > 0) {
+                            result.updated++;
                         }
+                        result.online += update.onlineChapterCount;
+                        result.koreanTotal += update.koreanTotalCount;
+                        result.korean += update.koreanChapterCount;
+                        result.queued += update.queuedCount;
+                        for(let value of update.languageValues) {
+                            if(result.languages.indexOf(value) < 0 && result.languages.length < 12) {
+                                result.languages.push(value);
+                            }
+                        }
+                    } catch(error) {
+                        result.failed++;
+                        console.warn('Failed to check bookmark for updates:', bookmark, error);
                     }
-                } catch(error) {
-                    result.failed++;
-                    console.warn('Failed to check bookmark for updates:', bookmark, error);
                 }
 
                 processed++;
@@ -61,16 +80,37 @@ export default class BookmarkUpdateManager extends EventTarget {
                     detail: {
                         current: processed,
                         total: bookmarks.length,
+                        skipped: skipped,
                         title: bookmark.title && bookmark.title.manga ? bookmark.title.manga : '',
                         connector: bookmark.title && bookmark.title.connector ? bookmark.title.connector : '',
                         result: Object.assign({}, result, { languages: result.languages.slice() })
                     }
                 }));
+            };
+
+            let worker = async () => {
+                while(true) {
+                    let index = nextIndex++;
+                    if(index >= bookmarks.length) {
+                        return;
+                    }
+                    await processBookmark(bookmarks[index]);
+                }
+            };
+
+            let workers = [];
+            let workerCount = Math.min(parallelChecks, bookmarks.length);
+            for(let index = 0; index < workerCount; index++) {
+                workers.push(worker());
             }
+            await Promise.all(workers);
 
             await this._storage.saveConfig(stateKey, state, 2);
             this.dispatchEvent(new CustomEvent('finished', {
-                detail: Object.assign({}, result, { languages: result.languages.slice() })
+                detail: Object.assign({}, result, {
+                    force: force,
+                    languages: result.languages.slice()
+                })
             }));
             return result;
         } finally {
@@ -81,6 +121,7 @@ export default class BookmarkUpdateManager extends EventTarget {
     _emptyResult() {
         return {
             checked: 0,
+            skipped: 0,
             updated: 0,
             online: 0,
             koreanTotal: 0,
@@ -89,6 +130,14 @@ export default class BookmarkUpdateManager extends EventTarget {
             failed: 0,
             languages: []
         };
+    }
+
+    _isFresh(previous) {
+        if(!previous || !previous.checkedAt) {
+            return false;
+        }
+        let checkedAt = Date.parse(previous.checkedAt);
+        return !Number.isNaN(checkedAt) && Date.now() - checkedAt < refreshInterval;
     }
 
     async _checkBookmark(bookmark, state) {
@@ -169,8 +218,6 @@ export default class BookmarkUpdateManager extends EventTarget {
             }
         }
 
-        // Some connectors do not expose a language value. Keep the fallback conservative so an
-        // unlabeled multi-language connector cannot accidentally queue every available chapter.
         if(values.length === 0) {
             let title = String(chapter.title || '').toLowerCase();
             return title.indexOf('🇰🇷') >= 0 || title.indexOf('[kr]') >= 0 ||
