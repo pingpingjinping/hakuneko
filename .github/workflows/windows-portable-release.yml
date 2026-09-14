@@ -29,7 +29,17 @@ jobs:
       - name: Build custom web application
         run: npm run build:web
 
-      - name: Build Windows packages
+      - name: Configure portable-only app build
+        shell: pwsh
+        run: |
+          $path = 'build-app.js'
+          $content = Get-Content $path -Raw
+          $content = $content.Replace("        await packager.buildIS('64');`r`n", '')
+          $content = $content.Replace("        await packager.buildIS('32');`r`n", '')
+          $content = $content.Replace("        await packager.buildZIP('32');`r`n", '')
+          Set-Content -Path $path -Value $content -Encoding UTF8
+
+      - name: Build Windows portable amd64
         run: npm run build:app
 
       - name: Inject custom web cache into portable amd64 build
