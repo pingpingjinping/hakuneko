@@ -86,28 +86,23 @@ export default class BookmarkUpdateManager extends EventTarget {
         let currentIDs = onlineChapters.map(chapter => String(chapter.id));
         let key = this._bookmarkKey(bookmark);
         let previous = state.bookmarks[key];
+        let known = new Set(previous && Array.isArray(previous.chapterIDs) ? previous.chapterIDs.map(id => String(id)) : []);
+        let newChapters = previous && Array.isArray(previous.chapterIDs)
+            ? onlineChapters.filter(chapter => !known.has(String(chapter.id)))
+            : [];
 
-        if(!previous || !Array.isArray(previous.chapterIDs)) {
-            state.bookmarks[key] = {
-                connector: bookmark.key.connector,
-                manga: bookmark.key.manga,
-                chapterIDs: currentIDs,
-                checkedAt: new Date().toISOString()
-            };
-            return { newChapterCount: 0, koreanChapterCount: 0, queuedCount: 0 };
-        }
-
-        let known = new Set(previous.chapterIDs.map(id => String(id)));
-        let newChapters = onlineChapters.filter(chapter => !known.has(String(chapter.id)));
-        let koreanChapters = newChapters.filter(chapter => this._isKoreanChapter(chapter));
+        // Download policy: every Korean chapter that is not present on disk is eligible.
+        // This intentionally does not depend on the update baseline. If an earlier scan saw a
+        // chapter but it was not downloaded, the next scan will still queue it again.
+        let missingKoreanChapters = onlineChapters.filter(chapter => {
+            return chapter.status === 'available' && this._isKoreanChapter(chapter);
+        });
         let queuedCount = 0;
 
         if(this._settings.autoDownloadBookmarkUpdates.value) {
-            for(let chapter of koreanChapters) {
-                if(chapter.status === 'available') {
-                    this._downloadManager.addDownload(chapter);
-                    queuedCount++;
-                }
+            for(let chapter of missingKoreanChapters) {
+                this._downloadManager.addDownload(chapter);
+                queuedCount++;
             }
         }
 
@@ -120,7 +115,7 @@ export default class BookmarkUpdateManager extends EventTarget {
 
         return {
             newChapterCount: newChapters.length,
-            koreanChapterCount: koreanChapters.length,
+            koreanChapterCount: missingKoreanChapters.length,
             queuedCount: queuedCount
         };
     }
