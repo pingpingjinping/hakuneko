@@ -80,6 +80,21 @@
             notification.parentNode.removeChild(notification);
         }
 
+        function resultText(result) {
+            return `온라인 ${result.online}` +
+                ` · 한국어 ${result.koreanTotal}` +
+                ` · 미다운로드 ${result.korean}` +
+                ` · 큐추가 ${result.queued}` +
+                ` · 실패 ${result.failed}`;
+        }
+
+        function languageText(result) {
+            if(!result.languages || result.languages.length < 1) {
+                return '';
+            }
+            return ` · 언어값 ${result.languages.join(', ')}`;
+        }
+
         function setupBookmarkUpdateUI() {
             let manager = Engine.BookmarkUpdateManager;
             let status = document.querySelector('#bookmark-update-status');
@@ -109,11 +124,8 @@
                 let result = detail.result;
                 let manga = detail.title ? ` · ${detail.title}` : '';
                 status.textContent =
-                    `북마크 확인 ${detail.current} / ${detail.total}` +
-                    ` · 업데이트 ${result.updated}` +
-                    ` · 한국어 미다운로드 ${result.korean}` +
-                    ` · 다운로드 ${result.queued}` +
-                    ` · 실패 ${result.failed}` + manga;
+                    `북마크 ${detail.current} / ${detail.total}` +
+                    ` · ${resultText(result)}` + manga;
             });
 
             manager.addEventListener('finished', event => {
@@ -121,10 +133,8 @@
                 button.disabled = false;
                 status.textContent =
                     `완료 · 확인 ${result.checked}` +
-                    ` · 업데이트 ${result.updated}` +
-                    ` · 한국어 미다운로드 ${result.korean}` +
-                    ` · 다운로드 ${result.queued}` +
-                    ` · 실패 ${result.failed}`;
+                    ` · ${resultText(result)}` +
+                    languageText(result);
             });
 
             if(manager.isRunning) {
