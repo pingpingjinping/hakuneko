@@ -69,6 +69,14 @@ export default class BookmarkUpdateManager extends EventTarget {
         let manga = new Manga(connector, bookmark.key.manga, bookmark.title.manga);
         let chapters = await this._getChapters(manga);
         let onlineChapters = chapters.filter(chapter => chapter.status !== 'offline');
+
+        // Manga.getChapters() may return an empty list after a temporary connector/network error.
+        // Never replace a valid baseline with an empty result, otherwise all historical chapters
+        // could be treated as new when the website becomes reachable again.
+        if(onlineChapters.length === 0) {
+            throw new Error('No online chapters returned; update state was left unchanged.');
+        }
+
         let currentIDs = onlineChapters.map(chapter => String(chapter.id));
         let key = this._bookmarkKey(bookmark);
         let previous = state.bookmarks[key];
