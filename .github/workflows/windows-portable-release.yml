@@ -85,7 +85,7 @@ jobs:
           - Custom web app is bundled into the portable package
           - Upstream web auto-update is disabled by default so the custom feature is not overwritten
 
-          Portable user data remains inside the package folder under `userdata`.
+          Portable user data remains inside the package folder under userdata.
           "@
 
           gh release view $env:TAG --repo $env:GITHUB_REPOSITORY 2>$null
