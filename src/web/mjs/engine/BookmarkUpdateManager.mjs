@@ -14,6 +14,16 @@ export default class BookmarkUpdateManager extends EventTarget {
         this._downloadManager = downloadManager;
         this._storage = storage;
         this._running = false;
+        this._activeState = null;
+        this._historySave = Promise.resolve();
+
+        this._downloadManager.addEventListener('updated', event => {
+            let job = event.detail;
+            if(job && job.status === 'completed' && job.chapter) {
+                this._rememberDownloadedChapter(job.chapter)
+                    .catch(error => console.warn('Failed to remember downloaded bookmark chapter:', error));
+            }
+        });
     }
 
     get isRunning() {
@@ -31,6 +41,7 @@ export default class BookmarkUpdateManager extends EventTarget {
 
         try {
             let state = await this._loadState();
+            this._activeState = state;
             let bookmarks = Array.from(this._bookmarkManager.bookmarks || []);
             let processed = 0;
             let nextIndex = 0;
@@ -114,6 +125,7 @@ export default class BookmarkUpdateManager extends EventTarget {
             }));
             return result;
         } finally {
+            this._activeState = null;
             this._running = false;
         }
     }
@@ -158,12 +170,26 @@ export default class BookmarkUpdateManager extends EventTarget {
         let key = this._bookmarkKey(bookmark);
         let previous = state.bookmarks[key];
         let known = new Set(previous && Array.isArray(previous.chapterIDs) ? previous.chapterIDs.map(id => String(id)) : []);
+        let downloaded = new Set(previous && Array.isArray(previous.downloadedChapterIDs)
+            ? previous.downloadedChapterIDs.map(id => String(id))
+            : []);
         let newChapters = previous && Array.isArray(previous.chapterIDs)
             ? onlineChapters.filter(chapter => !known.has(String(chapter.id)))
             : [];
 
         let koreanChapters = onlineChapters.filter(chapter => this._isKoreanChapter(chapter));
-        let missingKoreanChapters = koreanChapters.filter(chapter => chapter.status === 'available');
+
+        // Seed the permanent history from chapters that currently exist on disk.
+        // Once a chapter has been seen as completed, moving it elsewhere later must not trigger a re-download.
+        for(let chapter of koreanChapters) {
+            if(chapter.status === 'completed') {
+                downloaded.add(String(chapter.id));
+            }
+        }
+
+        let missingKoreanChapters = koreanChapters.filter(chapter => {
+            return chapter.status === 'available' && !downloaded.has(String(chapter.id));
+        });
         let languageValues = [];
 
         for(let chapter of onlineChapters) {
@@ -193,6 +219,7 @@ export default class BookmarkUpdateManager extends EventTarget {
             connector: bookmark.key.connector,
             manga: bookmark.key.manga,
             chapterIDs: currentIDs,
+            downloadedChapterIDs: Array.from(downloaded),
             checkedAt: new Date().toISOString()
         };
 
@@ -204,6 +231,41 @@ export default class BookmarkUpdateManager extends EventTarget {
             queuedCount: queuedCount,
             languageValues: languageValues
         };
+    }
+
+    async _rememberDownloadedChapter(chapter) {
+        let connector = chapter.manga && chapter.manga.connector;
+        let manga = chapter.manga;
+        if(!connector || !manga) {
+            return;
+        }
+
+        let apply = state => {
+            let key = JSON.stringify([connector.id, manga.id]);
+            let previous = state.bookmarks[key] || {};
+            let downloaded = new Set(Array.isArray(previous.downloadedChapterIDs)
+                ? previous.downloadedChapterIDs.map(id => String(id))
+                : []);
+            downloaded.add(String(chapter.id));
+            state.bookmarks[key] = Object.assign({}, previous, {
+                connector: connector.id,
+                manga: manga.id,
+                downloadedChapterIDs: Array.from(downloaded)
+            });
+            return state;
+        };
+
+        if(this._activeState) {
+            apply(this._activeState);
+            return;
+        }
+
+        this._historySave = this._historySave.then(async () => {
+            let state = await this._loadState();
+            apply(state);
+            await this._storage.saveConfig(stateKey, state, 2);
+        });
+        await this._historySave;
     }
 
     _isKoreanChapter(chapter) {
