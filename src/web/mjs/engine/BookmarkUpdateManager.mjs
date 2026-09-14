@@ -20,11 +20,11 @@ export default class BookmarkUpdateManager extends EventTarget {
 
     async checkForUpdates() {
         if(this._running) {
-            return { checked: 0, updated: 0, queued: 0, failed: 0 };
+            return { checked: 0, updated: 0, korean: 0, queued: 0, failed: 0 };
         }
 
         this._running = true;
-        let result = { checked: 0, updated: 0, queued: 0, failed: 0 };
+        let result = { checked: 0, updated: 0, korean: 0, queued: 0, failed: 0 };
 
         try {
             let state = await this._loadState();
@@ -32,14 +32,9 @@ export default class BookmarkUpdateManager extends EventTarget {
             let processed = 0;
 
             this.dispatchEvent(new CustomEvent('started', {
-                detail: {
-                    total: bookmarks.length,
-                    result: Object.assign({}, result)
-                }
+                detail: { total: bookmarks.length, result: Object.assign({}, result) }
             }));
 
-            // Process bookmarks sequentially. Some connectors rate-limit or internally lock requests,
-            // and checking every bookmark in parallel can easily trip those protections.
             for(let bookmark of bookmarks) {
                 try {
                     let update = await this._checkBookmark(bookmark, state);
@@ -47,6 +42,7 @@ export default class BookmarkUpdateManager extends EventTarget {
                     if(update.newChapterCount > 0) {
                         result.updated++;
                     }
+                    result.korean += update.koreanChapterCount;
                     result.queued += update.queuedCount;
                 } catch(error) {
                     result.failed++;
@@ -66,10 +62,6 @@ export default class BookmarkUpdateManager extends EventTarget {
             }
 
             await this._storage.saveConfig(stateKey, state, 2);
-            console.info(
-                `Bookmark update check finished: ${result.checked} checked, ` +
-                `${result.updated} updated, ${result.queued} queued, ${result.failed} failed.`
-            );
             this.dispatchEvent(new CustomEvent('finished', { detail: result }));
             return result;
         } finally {
@@ -83,15 +75,10 @@ export default class BookmarkUpdateManager extends EventTarget {
             throw new Error(`Connector not found: ${bookmark.key.connector}`);
         }
 
-        // A Manga object only needs connector/id/title to retrieve its current chapter list.
-        // This avoids refreshing the connector's complete manga list just to check a bookmark.
         let manga = new Manga(connector, bookmark.key.manga, bookmark.title.manga);
         let chapters = await this._getChapters(manga);
         let onlineChapters = chapters.filter(chapter => chapter.status !== 'offline');
 
-        // Manga.getChapters() may return an empty list after a temporary connector/network error.
-        // Never replace a valid baseline with an empty result, otherwise all historical chapters
-        // could be treated as new when the website becomes reachable again.
         if(onlineChapters.length === 0) {
             throw new Error('No online chapters returned; update state was left unchanged.');
         }
@@ -100,8 +87,6 @@ export default class BookmarkUpdateManager extends EventTarget {
         let key = this._bookmarkKey(bookmark);
         let previous = state.bookmarks[key];
 
-        // First encounter is deliberately a baseline only. Without this guard, enabling the
-        // feature would interpret every historical chapter as new and queue the entire series.
         if(!previous || !Array.isArray(previous.chapterIDs)) {
             state.bookmarks[key] = {
                 connector: bookmark.key.connector,
@@ -109,17 +94,16 @@ export default class BookmarkUpdateManager extends EventTarget {
                 chapterIDs: currentIDs,
                 checkedAt: new Date().toISOString()
             };
-            return { newChapterCount: 0, queuedCount: 0 };
+            return { newChapterCount: 0, koreanChapterCount: 0, queuedCount: 0 };
         }
 
         let known = new Set(previous.chapterIDs.map(id => String(id)));
         let newChapters = onlineChapters.filter(chapter => !known.has(String(chapter.id)));
+        let koreanChapters = newChapters.filter(chapter => this._isKoreanChapter(chapter));
         let queuedCount = 0;
 
         if(this._settings.autoDownloadBookmarkUpdates.value) {
-            for(let chapter of newChapters) {
-                // Completed chapters may appear as newly discovered after state recovery/import.
-                // Never queue files HakuNeko already sees on disk.
+            for(let chapter of koreanChapters) {
                 if(chapter.status === 'available') {
                     this._downloadManager.addDownload(chapter);
                     queuedCount++;
@@ -134,14 +118,40 @@ export default class BookmarkUpdateManager extends EventTarget {
             checkedAt: new Date().toISOString()
         };
 
-        if(newChapters.length > 0) {
-            console.info(
-                `Bookmark updated: ${bookmark.title.manga} (${bookmark.title.connector}) - ` +
-                `${newChapters.length} new chapter(s), ${queuedCount} queued.`
-            );
+        return {
+            newChapterCount: newChapters.length,
+            koreanChapterCount: koreanChapters.length,
+            queuedCount: queuedCount
+        };
+    }
+
+    _isKoreanChapter(chapter) {
+        let language = chapter.language;
+        let value = '';
+
+        if(typeof language === 'string' || typeof language === 'number') {
+            value = String(language).trim().toLowerCase();
+        } else if(language) {
+            for(let property of ['code', 'id', 'name', 'label', 'language']) {
+                if(language[property] !== undefined && language[property] !== null) {
+                    value = String(language[property]).trim().toLowerCase();
+                    break;
+                }
+            }
         }
 
-        return { newChapterCount: newChapters.length, queuedCount };
+        if(['ko', 'kr', 'kor', 'ko-kr', 'korean', '한국어', '한국'].includes(value)) {
+            return true;
+        }
+
+        if(value) {
+            return false;
+        }
+
+        let title = String(chapter.title || '').toLowerCase();
+        return title.includes('[kr]') || title.includes('[kor]') || title.includes('[korean]') ||
+            title.includes('[한국어]') || title.includes('(kr)') || title.includes('(korean)') ||
+            title.includes('(한국어)');
     }
 
     _getChapters(manga) {
@@ -168,10 +178,7 @@ export default class BookmarkUpdateManager extends EventTarget {
             }
             return state;
         } catch(error) {
-            return {
-                version: stateVersion,
-                bookmarks: {}
-            };
+            return { version: stateVersion, bookmarks: {} };
         }
     }
 }
