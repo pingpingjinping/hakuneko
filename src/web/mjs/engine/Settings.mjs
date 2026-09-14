@@ -26,6 +26,7 @@ const types = {
     text: 'text',
     password: 'password',
     numeric: 'numeric',
+    range: 'range',
     select: 'select',
     checkbox: 'checkbox',
     file: 'file',
@@ -89,21 +90,59 @@ export default class Settings extends EventTarget {
         this.autoCheckBookmarkUpdates = {
             label: 'Check Bookmark Updates on Startup',
             description: [
-                'Check every bookmarked manga for newly published chapters when HakuNeko starts.',
-                'The first check only records the current chapter list as a baseline and will not download older chapters.'
+                'Check bookmarked manga automatically when HakuNeko starts.',
+                'Manga checked within the last 12 hours are skipped.'
             ].join('\n'),
             input: types.checkbox,
             value: true
         };
 
         this.autoDownloadBookmarkUpdates = {
-            label: 'Auto-Download Bookmark Updates',
+            label: 'Auto-Download Missing Bookmark Chapters',
             description: [
-                'Automatically add newly discovered chapters from bookmarked manga to the download queue.',
-                'Only chapters discovered after the first baseline check are queued.'
+                'Automatically download missing bookmarked chapters in the selected language.',
+                'Successfully downloaded chapters are remembered so moving files later will not download them again.'
             ].join('\n'),
             input: types.checkbox,
             value: true
+        };
+
+        this.bookmarkUpdateParallelChecks = {
+            label: 'Bookmark Check Parallelism',
+            description: [
+                'Number of bookmarked manga to check at the same time.',
+                'Higher values are faster, but may increase load on source websites or trigger rate limits.'
+            ].join('\n'),
+            input: types.range,
+            min: 1,
+            max: 10,
+            step: 1,
+            value: 3
+        };
+
+        this.bookmarkDownloadLanguage = {
+            label: 'Bookmark Auto-Download Language',
+            description: [
+                'Only automatically download chapters matching this language group.',
+                'Common aliases and locale variants are grouped together (for example Korean: ko, kr, kor, ko-KR, Korean, 한국어).'
+            ].join('\n'),
+            input: types.select,
+            options: [
+                { value: 'ko', name: '한국어 (Korean)' },
+                { value: 'en', name: 'English' },
+                { value: 'ja', name: '日本語 (Japanese)' },
+                { value: 'zh', name: '中文 (Chinese)' },
+                { value: 'es', name: 'Español (Spanish)' },
+                { value: 'fr', name: 'Français (French)' },
+                { value: 'de', name: 'Deutsch (German)' },
+                { value: 'it', name: 'Italiano (Italian)' },
+                { value: 'pt', name: 'Português (Portuguese)' },
+                { value: 'ru', name: 'Русский (Russian)' },
+                { value: 'vi', name: 'Tiếng Việt (Vietnamese)' },
+                { value: 'id', name: 'Bahasa Indonesia (Indonesian)' },
+                { value: 'th', name: 'ไทย (Thai)' }
+            ],
+            value: 'ko'
         };
 
         this.useSubdirectory = {
@@ -198,7 +237,7 @@ export default class Settings extends EventTarget {
                 '  http=127.0.0.1:8080;https=127.0.0.1:8080;socks=127.0.0.1:8081',
                 '',
                 'More info: https://git.io/hakuneko-proxy'
-            ].join( '\n' ),
+            ].join('\n'),
             input: types.text,
             value: ''
         };
@@ -212,7 +251,7 @@ export default class Settings extends EventTarget {
                 '',
                 'Examples:',
                 '  username:password'
-            ].join( '\n' ),
+            ].join('\n'),
             input: types.password,
             value: ''
         };
@@ -324,8 +363,8 @@ export default class Settings extends EventTarget {
                         && data.connectors[connector.id][key] !== undefined
                         && connector.config[key]
                         && connector.config[key].input) {
-                        connector.config[key].value = this._getDecryptedValue(connector.config[key].input, data.connectors[connector.id][key]);
-                        connector.config[key].value = this._getValidValue(connector.label, connector.config[key], true);
+                    connector.config[key].value = this._getDecryptedValue(connector.config[key].input, data.connectors[connector.id][key]);
+                    connector.config[key].value = this._getValidValue(connector.label, connector.config[key], true);
                     }
                 }
             }
@@ -344,8 +383,8 @@ export default class Settings extends EventTarget {
                     data[key] = this._getEncryptedValue(this[key].input, this[key].value);
                 }
             }
-            // gather settings from each connector
-            data['connectors'] = {};
+            // apply connector specific settings
+            data.connectors = {};
             for(let connector of Engine.Connectors) {
                 data.connectors[connector.id] = {};
                 for(let key in connector.config) {
@@ -359,11 +398,6 @@ export default class Settings extends EventTarget {
         }
     }
 
-    /**
-     *
-     * @param inputType
-     * @param decryptedValue
-     */
     _getEncryptedValue(inputType, decryptedValue) {
         if(inputType !== types.password || !decryptedValue || decryptedValue.length < 1) {
             return decryptedValue;
@@ -371,9 +405,6 @@ export default class Settings extends EventTarget {
         return CryptoJS.AES.encrypt(decryptedValue, 'HakuNeko!').toString();
     }
 
-    /**
-     *
-     */
     _getDecryptedValue(inputType, encryptedValue) {
         if(inputType !== types.password || !encryptedValue || encryptedValue.length < 1) {
             return encryptedValue;
@@ -381,13 +412,15 @@ export default class Settings extends EventTarget {
         return CryptoJS.AES.decrypt(encryptedValue, 'HakuNeko!').toString(CryptoJS.enc.Utf8);
     }
 
-    /**
-     *
-     */
     _getValidValue(scope, setting, silent) {
         let value = setting.value;
         switch(setting.input) {
             case types.numeric:
+            case types.range:
+                value = Number(value);
+                if(Number.isNaN(value)) {
+                    value = setting.min !== undefined ? setting.min : 0;
+                }
                 if(setting.min !== undefined && value < setting.min) {
                     return setting.min;
                 }
