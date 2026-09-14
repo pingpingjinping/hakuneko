@@ -18,7 +18,6 @@
         const electronDialog = require('electron').remote.dialog
         import HakuNeko from './mjs/HakuNeko.mjs'
 
-        // https://github.com/electron/electron/blob/master/docs/api/dialog.md#dialogshowmessageboxbrowserwindow-options
         function replaceDialogs() {
             alert = async (message, title, type) => {
                 let options = {
@@ -51,12 +50,8 @@
         async function loadEngine() {
             console.log('Loading Engine:', 'HakuNeko');
             window.HakuNeko = new HakuNeko(window);
-            // TODO: remove backward compatibility alias 'Engine' when all references are set to HakuNeko engine
             window.Engine = window.HakuNeko;
-            
             await Engine.initialize();
-            // TODO: remove stuff that requires various globals, incl. global HakuNeko engine
-            //new HistoryWorker();
             await Engine.Settings.load();
             await loadBookmarks();
             Engine.ChaptermarkManager.loadChaptermarks(undefined);
@@ -69,14 +64,11 @@
         }
 
         function loadClassicPolymer(identifier) {
-            // the entry tag for the web application
             let element = document.createElement('hakuneko-app');
             document.body.appendChild(element);
-            // the required webcomponents for polymer
             let webcomponents = document.createElement('script');
             webcomponents.src = './lib/webcomponentsjs/webcomponents-loader.js';
             document.head.appendChild(webcomponents);
-            // the hakuneko application polymer element
             let frontend = document.createElement('link');
             frontend.href = `./lib/hakuneko/${identifier}/app.html`;
             frontend.rel = 'import';
@@ -119,6 +111,7 @@
                 status.textContent =
                     `북마크 확인 ${detail.current} / ${detail.total}` +
                     ` · 업데이트 ${result.updated}` +
+                    ` · 한국어 ${result.korean}` +
                     ` · 다운로드 ${result.queued}` +
                     ` · 실패 ${result.failed}` + manga;
             });
@@ -129,6 +122,7 @@
                 status.textContent =
                     `완료 · 확인 ${result.checked}` +
                     ` · 업데이트 ${result.updated}` +
+                    ` · 한국어 ${result.korean}` +
                     ` · 다운로드 ${result.queued}` +
                     ` · 실패 ${result.failed}`;
             });
@@ -145,7 +139,6 @@
             setupBookmarkUpdateUI();
             loadFrontend();
 
-            // Run after the UI starts loading so a large bookmark library does not hold up startup.
             if(Engine.Settings.autoCheckBookmarkUpdates.value) {
                 setTimeout(() => {
                     Engine.BookmarkUpdateManager.checkForUpdates()
@@ -237,10 +230,10 @@
     <div id="notification">
         A new <strong>HakuNeko Desktop Client</strong> is available for download on
         <a href="https://github.com/manga-download/hakuneko/releases" target="_blank">GitHub</a>
-        <span id="close" onclick="closeNotification()" title="Hide notification">✖</span><!-- ❌&times; -->
+        <span id="close" onclick="closeNotification()" title="Hide notification">✖</span>
     </div>
     <div id="bookmark-update-panel">
-        <span id="bookmark-update-status">북마크 업데이트 대기 중</span>
+        <span id="bookmark-update-status">북마크 업데이트 대기 중 · 한국어만 자동 다운로드</span>
         <button id="bookmark-update-button" type="button">지금 확인</button>
     </div>
 </body>
