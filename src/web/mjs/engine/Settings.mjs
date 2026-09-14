@@ -86,6 +86,26 @@ export default class Settings extends EventTarget {
             value: app.getPath( 'userData' )
         };
 
+        this.autoCheckBookmarkUpdates = {
+            label: 'Check Bookmark Updates on Startup',
+            description: [
+                'Check every bookmarked manga for newly published chapters when HakuNeko starts.',
+                'The first check only records the current chapter list as a baseline and will not download older chapters.'
+            ].join('\n'),
+            input: types.checkbox,
+            value: true
+        };
+
+        this.autoDownloadBookmarkUpdates = {
+            label: 'Auto-Download Bookmark Updates',
+            description: [
+                'Automatically add newly discovered chapters from bookmarked manga to the download queue.',
+                'Only chapters discovered after the first baseline check are queued.'
+            ].join('\n'),
+            input: types.checkbox,
+            value: true
+        };
+
         this.useSubdirectory = {
             label: 'Use Sub-Directories',
             description: 'Create sub-directories for each website (e.g. "/downloads/mangadex/...")',
@@ -353,8 +373,6 @@ export default class Settings extends EventTarget {
 
     /**
      *
-     * @param inputType
-     * @param encryptedValue
      */
     _getDecryptedValue(inputType, encryptedValue) {
         if(inputType !== types.password || !encryptedValue || encryptedValue.length < 1) {

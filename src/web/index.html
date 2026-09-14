@@ -42,6 +42,12 @@
             };
         }
 
+        function loadBookmarks() {
+            return new Promise(resolve => {
+                Engine.BookmarkManager.loadProfile('default', error => resolve(error));
+            });
+        }
+
         async function loadEngine() {
             console.log('Loading Engine:', 'HakuNeko');
             window.HakuNeko = new HakuNeko(window);
@@ -52,8 +58,8 @@
             // TODO: remove stuff that requires various globals, incl. global HakuNeko engine
             //new HistoryWorker();
             await Engine.Settings.load();
-            Engine.BookmarkManager.loadProfile( 'default', undefined );
-            Engine.ChaptermarkManager.loadChaptermarks( undefined );
+            await loadBookmarks();
+            Engine.ChaptermarkManager.loadChaptermarks(undefined);
         }
 
         function loadFrontend() {
@@ -86,6 +92,14 @@
             replaceDialogs();
             await loadEngine();
             loadFrontend();
+
+            // Run after the UI starts loading so a large bookmark library does not hold up startup.
+            if(Engine.Settings.autoCheckBookmarkUpdates.value) {
+                setTimeout(() => {
+                    Engine.BookmarkUpdateManager.checkForUpdates()
+                        .catch(error => console.error('Bookmark update check failed:', error));
+                }, 0);
+            }
         }
 
         main();

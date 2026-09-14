@@ -4,6 +4,7 @@ import Connector from './engine/Connector.mjs';
 import Blacklist from './engine/Blacklist.mjs';
 import BookmarkImporter from './engine/BookmarkImporter.mjs';
 import BookmarkManager from './engine/BookmarkManager.mjs';
+import BookmarkUpdateManager from './engine/BookmarkUpdateManager.mjs';
 import ChaptermarkManager from './engine/ChaptermarkManager.mjs';
 import Connectors from './engine/Connectors.mjs';
 import DownloadManager from './engine/DownloadManager.mjs';
@@ -30,6 +31,7 @@ export default class HakuNeko {
         this._connectors = new Connectors(this._request);
         this._storage = new Storage();
         this._bookmarkManager = new BookmarkManager(this._settings, new BookmarkImporter());
+        this._bookmarkUpdateManager = new BookmarkUpdateManager(this._settings, this._bookmarkManager, this._downloadManager, this._storage);
         this._comicInfoGenerator = new ComicInfoGenerator();
         this._chaptermarkManager = new ChaptermarkManager(this._settings);
     }
@@ -40,7 +42,7 @@ export default class HakuNeko {
      * @param context
      */
     _initializeGlobals(context) {
-        // TODO: remove backward compatibility for global aliases when all their references are set to HakuNeko engine
+        // TODO: remove backward compatibility for global aliases when all references are set to HakuNeko engine
 
         // required by various frontend and engine components
         context.EventListener = Enums.EventListener;
@@ -59,6 +61,10 @@ export default class HakuNeko {
 
     get BookmarkManager() {
         return this._bookmarkManager;
+    }
+
+    get BookmarkUpdateManager() {
+        return this._bookmarkUpdateManager;
     }
 
     get ComicInfoGenerator() {
