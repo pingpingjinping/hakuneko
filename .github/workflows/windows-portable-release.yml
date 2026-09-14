@@ -39,6 +39,19 @@ jobs:
           $content = $content.Replace("        await packager.buildZIP('32');`r`n", '')
           Set-Content -Path $path -Value $content -Encoding UTF8
 
+      - name: Pre-download Electron runtime
+        shell: pwsh
+        run: |
+          $dest = 'redist\electron-v6.1.7-win32-x64.zip'
+          New-Item -ItemType Directory -Path 'redist' -Force | Out-Null
+          if (Test-Path $dest) { Remove-Item $dest -Force }
+          Invoke-WebRequest -Uri 'https://github.com/electron/electron/releases/download/v6.1.7/electron-v6.1.7-win32-x64.zip' -OutFile $dest
+          $file = Get-Item $dest
+          if ($file.Length -lt 1000000) {
+            throw "Electron runtime download is incomplete: $($file.Length) bytes"
+          }
+          Write-Host "Electron runtime ready: $($file.Length) bytes"
+
       - name: Build Windows portable amd64
         run: npm run build:app
 
