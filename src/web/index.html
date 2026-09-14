@@ -81,7 +81,8 @@
         }
 
         function resultText(result) {
-            return `온라인 ${result.online}` +
+            return `건너뜀 ${result.skipped || 0}` +
+                ` · 온라인 ${result.online}` +
                 ` · 한국어 ${result.koreanTotal}` +
                 ` · 미다운로드 ${result.korean}` +
                 ` · 큐추가 ${result.queued}` +
@@ -104,7 +105,7 @@
                 if(manager.isRunning) {
                     return;
                 }
-                manager.checkForUpdates().catch(error => {
+                manager.checkForUpdates({ force: true }).catch(error => {
                     button.disabled = false;
                     status.textContent = `북마크 검사 오류: ${error.message || error}`;
                     console.error('Bookmark update check failed:', error);
@@ -116,7 +117,8 @@
             manager.addEventListener('started', event => {
                 let detail = event.detail;
                 button.disabled = true;
-                status.textContent = `북마크 업데이트 확인 중... 0 / ${detail.total}`;
+                let mode = detail.force ? '전체 강제 검사' : '12시간 캐시 검사';
+                status.textContent = `북마크 업데이트 확인 중... 0 / ${detail.total} · ${mode} · ${detail.parallel}개 병렬`;
             });
 
             manager.addEventListener('progress', event => {
@@ -243,7 +245,7 @@
         <span id="close" onclick="closeNotification()" title="Hide notification">✖</span>
     </div>
     <div id="bookmark-update-panel">
-        <span id="bookmark-update-status">북마크 업데이트 대기 중 · 없는 한국어 챕터 자동 다운로드</span>
+        <span id="bookmark-update-status">북마크 업데이트 대기 중 · 12시간 캐시 · 3개 병렬</span>
         <button id="bookmark-update-button" type="button">지금 확인</button>
     </div>
 </body>
