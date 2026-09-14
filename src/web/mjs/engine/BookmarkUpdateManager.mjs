@@ -3,7 +3,74 @@ import Manga from './Manga.mjs';
 const stateKey = 'bookmark-update-state';
 const stateVersion = 1;
 const refreshInterval = 12 * 60 * 60 * 1000;
-const parallelChecks = 3;
+
+const languageGroups = {
+    ko: {
+        label: '한국어',
+        codes: ['ko', 'kr', 'kor', 'ko-kr'],
+        words: ['korean', '한국', '조선', '🇰🇷']
+    },
+    en: {
+        label: 'English',
+        codes: ['en', 'eng', 'en-us', 'en-gb'],
+        words: ['english', '🇬🇧', '🇺🇸']
+    },
+    ja: {
+        label: '日本語',
+        codes: ['ja', 'jp', 'jpn', 'ja-jp'],
+        words: ['japanese', '日本語', '日本', '🇯🇵']
+    },
+    zh: {
+        label: '中文',
+        codes: ['zh', 'zho', 'chi', 'zh-cn', 'zh-tw', 'zh-hk'],
+        words: ['chinese', '中文', '简体', '簡體', '繁體', '繁体', '汉语', '漢語', '🇨🇳', '🇹🇼', '🇭🇰']
+    },
+    es: {
+        label: 'Español',
+        codes: ['es', 'spa', 'es-es', 'es-la', 'es-mx'],
+        words: ['spanish', 'español', 'espanol', '🇪🇸']
+    },
+    fr: {
+        label: 'Français',
+        codes: ['fr', 'fra', 'fre', 'fr-fr'],
+        words: ['french', 'français', 'francais', '🇫🇷']
+    },
+    de: {
+        label: 'Deutsch',
+        codes: ['de', 'deu', 'ger', 'de-de'],
+        words: ['german', 'deutsch', '🇩🇪']
+    },
+    it: {
+        label: 'Italiano',
+        codes: ['it', 'ita', 'it-it'],
+        words: ['italian', 'italiano', '🇮🇹']
+    },
+    pt: {
+        label: 'Português',
+        codes: ['pt', 'por', 'pt-br', 'pt-pt'],
+        words: ['portuguese', 'português', 'portugues', '🇵🇹', '🇧🇷']
+    },
+    ru: {
+        label: 'Русский',
+        codes: ['ru', 'rus', 'ru-ru'],
+        words: ['russian', 'русский', '🇷🇺']
+    },
+    vi: {
+        label: 'Tiếng Việt',
+        codes: ['vi', 'vie', 'vietnamese'],
+        words: ['vietnamese', 'tiếng việt', 'tieng viet', '🇻🇳']
+    },
+    id: {
+        label: 'Bahasa Indonesia',
+        codes: ['id', 'ind', 'id-id'],
+        words: ['indonesian', 'bahasa indonesia', '🇮🇩']
+    },
+    th: {
+        label: 'ไทย',
+        codes: ['th', 'tha', 'th-th'],
+        words: ['thai', 'ไทย', '🇹🇭']
+    }
+};
 
 export default class BookmarkUpdateManager extends EventTarget {
 
@@ -36,8 +103,11 @@ export default class BookmarkUpdateManager extends EventTarget {
         }
 
         this._running = true;
-        let result = this._emptyResult();
+        let languageCode = this._getTargetLanguageCode();
+        let languageLabel = this._getLanguageLabel(languageCode);
+        let result = this._emptyResult(languageCode, languageLabel);
         let force = !!(options && options.force);
+        let parallelChecks = this._getParallelChecks();
 
         try {
             let state = await this._loadState();
@@ -52,6 +122,8 @@ export default class BookmarkUpdateManager extends EventTarget {
                     force: force,
                     parallel: parallelChecks,
                     refreshHours: 12,
+                    languageCode: languageCode,
+                    languageLabel: languageLabel,
                     result: Object.assign({}, result)
                 }
             }));
@@ -66,20 +138,18 @@ export default class BookmarkUpdateManager extends EventTarget {
                     skipped = true;
                 } else {
                     try {
-                        let update = await this._checkBookmark(bookmark, state);
+                        let update = await this._checkBookmark(bookmark, state, languageCode);
                         result.checked++;
                         if(update.newChapterCount > 0) {
                             result.updated++;
                         }
                         result.online += update.onlineChapterCount;
-                        result.koreanTotal += update.koreanTotalCount;
-                        result.korean += update.koreanChapterCount;
+                        result.targetTotal += update.targetLanguageTotalCount;
+                        result.targetMissing += update.targetLanguageMissingCount;
+                        // Keep old fields for compatibility with older status UI builds.
+                        result.koreanTotal = result.targetTotal;
+                        result.korean = result.targetMissing;
                         result.queued += update.queuedCount;
-                        for(let value of update.languageValues) {
-                            if(result.languages.indexOf(value) < 0 && result.languages.length < 12) {
-                                result.languages.push(value);
-                            }
-                        }
                     } catch(error) {
                         result.failed++;
                         console.warn('Failed to check bookmark for updates:', bookmark, error);
@@ -94,7 +164,9 @@ export default class BookmarkUpdateManager extends EventTarget {
                         skipped: skipped,
                         title: bookmark.title && bookmark.title.manga ? bookmark.title.manga : '',
                         connector: bookmark.title && bookmark.title.connector ? bookmark.title.connector : '',
-                        result: Object.assign({}, result, { languages: result.languages.slice() })
+                        languageCode: languageCode,
+                        languageLabel: languageLabel,
+                        result: Object.assign({}, result)
                     }
                 }));
             };
@@ -120,7 +192,9 @@ export default class BookmarkUpdateManager extends EventTarget {
             this.dispatchEvent(new CustomEvent('finished', {
                 detail: Object.assign({}, result, {
                     force: force,
-                    languages: result.languages.slice()
+                    parallel: parallelChecks,
+                    languageCode: languageCode,
+                    languageLabel: languageLabel
                 })
             }));
             return result;
@@ -130,18 +204,38 @@ export default class BookmarkUpdateManager extends EventTarget {
         }
     }
 
-    _emptyResult() {
+    _emptyResult(languageCode, languageLabel) {
         return {
             checked: 0,
             skipped: 0,
             updated: 0,
             online: 0,
+            targetTotal: 0,
+            targetMissing: 0,
             koreanTotal: 0,
             korean: 0,
             queued: 0,
             failed: 0,
-            languages: []
+            languageCode: languageCode || this._getTargetLanguageCode(),
+            languageLabel: languageLabel || this._getLanguageLabel(this._getTargetLanguageCode())
         };
+    }
+
+    _getParallelChecks() {
+        let value = Number(this._settings.bookmarkUpdateParallelChecks && this._settings.bookmarkUpdateParallelChecks.value);
+        if(Number.isNaN(value)) {
+            value = 3;
+        }
+        return Math.max(1, Math.min(10, Math.round(value)));
+    }
+
+    _getTargetLanguageCode() {
+        let value = this._settings.bookmarkDownloadLanguage && this._settings.bookmarkDownloadLanguage.value;
+        return languageGroups[value] ? value : 'ko';
+    }
+
+    _getLanguageLabel(code) {
+        return languageGroups[code] ? languageGroups[code].label : code;
     }
 
     _isFresh(previous) {
@@ -152,7 +246,7 @@ export default class BookmarkUpdateManager extends EventTarget {
         return !Number.isNaN(checkedAt) && Date.now() - checkedAt < refreshInterval;
     }
 
-    async _checkBookmark(bookmark, state) {
+    async _checkBookmark(bookmark, state, languageCode) {
         let connector = Engine.Connectors.find(connector => connector.id === bookmark.key.connector);
         if(!connector) {
             throw new Error(`Connector not found: ${bookmark.key.connector}`);
@@ -177,39 +271,23 @@ export default class BookmarkUpdateManager extends EventTarget {
             ? onlineChapters.filter(chapter => !known.has(String(chapter.id)))
             : [];
 
-        let koreanChapters = onlineChapters.filter(chapter => this._isKoreanChapter(chapter));
+        let targetChapters = onlineChapters.filter(chapter => this._isLanguageChapter(chapter, languageCode));
 
-        // Seed the permanent history from chapters that currently exist on disk.
-        // Once a chapter has been seen as completed, moving it elsewhere later must not trigger a re-download.
-        for(let chapter of koreanChapters) {
+        // Seed permanent history from matching chapters that currently exist on disk.
+        // Once a chapter has been completed, moving it elsewhere later must not trigger a re-download.
+        for(let chapter of targetChapters) {
             if(chapter.status === 'completed') {
                 downloaded.add(String(chapter.id));
             }
         }
 
-        let missingKoreanChapters = koreanChapters.filter(chapter => {
+        let missingTargetChapters = targetChapters.filter(chapter => {
             return chapter.status === 'available' && !downloaded.has(String(chapter.id));
         });
-        let languageValues = [];
-
-        for(let chapter of onlineChapters) {
-            let values = this._languageStrings(chapter.language);
-            if(values.length === 0) {
-                if(languageValues.indexOf('(없음)') < 0) {
-                    languageValues.push('(없음)');
-                }
-            } else {
-                for(let value of values) {
-                    if(languageValues.indexOf(value) < 0 && languageValues.length < 8) {
-                        languageValues.push(value);
-                    }
-                }
-            }
-        }
 
         let queuedCount = 0;
         if(this._settings.autoDownloadBookmarkUpdates.value) {
-            for(let chapter of missingKoreanChapters) {
+            for(let chapter of missingTargetChapters) {
                 this._downloadManager.addDownload(chapter);
                 queuedCount++;
             }
@@ -226,10 +304,9 @@ export default class BookmarkUpdateManager extends EventTarget {
         return {
             newChapterCount: newChapters.length,
             onlineChapterCount: onlineChapters.length,
-            koreanTotalCount: koreanChapters.length,
-            koreanChapterCount: missingKoreanChapters.length,
-            queuedCount: queuedCount,
-            languageValues: languageValues
+            targetLanguageTotalCount: targetChapters.length,
+            targetLanguageMissingCount: missingTargetChapters.length,
+            queuedCount: queuedCount
         };
     }
 
@@ -268,25 +345,42 @@ export default class BookmarkUpdateManager extends EventTarget {
         await this._historySave;
     }
 
-    _isKoreanChapter(chapter) {
+    _isLanguageChapter(chapter, languageCode) {
+        let group = languageGroups[languageCode] || languageGroups.ko;
         let values = this._languageStrings(chapter.language);
+
         for(let value of values) {
             let normalized = value.trim().toLowerCase().replace(/_/g, '-');
-            if(normalized.indexOf('🇰🇷') >= 0 || normalized.indexOf('korean') >= 0 || normalized.indexOf('한국') >= 0) {
+            if(group.codes.indexOf(normalized) >= 0) {
                 return true;
             }
-            if(/(^|[^a-z])(ko|kr|kor)([^a-z]|$)/i.test(normalized)) {
-                return true;
+            for(let word of group.words) {
+                if(normalized.indexOf(word.toLowerCase()) >= 0) {
+                    return true;
+                }
+            }
+            for(let code of group.codes) {
+                let escaped = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                let regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
+                if(regex.test(normalized)) {
+                    return true;
+                }
             }
         }
 
+        // Some connectors expose no language field. Only accept clearly marked titles in that case.
         if(values.length === 0) {
-            let title = String(chapter.title || '').toLowerCase();
-            return title.indexOf('🇰🇷') >= 0 || title.indexOf('[kr]') >= 0 ||
-                title.indexOf('[kor]') >= 0 || title.indexOf('[korean]') >= 0 ||
-                title.indexOf('[한국어]') >= 0 || title.indexOf('(kr)') >= 0 ||
-                title.indexOf('(kor)') >= 0 || title.indexOf('(korean)') >= 0 ||
-                title.indexOf('(한국어)') >= 0;
+            let title = String(chapter.title || '').toLowerCase().replace(/_/g, '-');
+            for(let word of group.words) {
+                if(title.indexOf(word.toLowerCase()) >= 0) {
+                    return true;
+                }
+            }
+            for(let code of group.codes) {
+                if(title.indexOf(`[${code}]`) >= 0 || title.indexOf(`(${code})`) >= 0) {
+                    return true;
+                }
+            }
         }
 
         return false;
