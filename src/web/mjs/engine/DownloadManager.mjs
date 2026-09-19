@@ -33,7 +33,9 @@ export default class DownloadManager extends EventTarget {
             job.addEventListener('updated', evt => this.dispatchEvent(new CustomEvent(evt.type, evt)));
             this.queue[connector.id].push( job );
             job.setStatus( statusDefinitions.queued );
+            return true;
         }
+        return false;
     }
 
     /**
