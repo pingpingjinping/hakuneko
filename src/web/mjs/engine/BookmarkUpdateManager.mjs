@@ -83,10 +83,21 @@ export default class BookmarkUpdateManager extends EventTarget {
         this._running = false;
         this._activeState = null;
         this._historySave = Promise.resolve();
+        this._autoDownloadStates = {};
 
         this._downloadManager.addEventListener('updated', event => {
             let job = event.detail;
-            if(job && job.status === 'completed' && job.chapter) {
+            if(!job || !job.chapter) {
+                return;
+            }
+
+            let downloadKey = this._chapterKey(job.chapter);
+            if(this._autoDownloadStates[downloadKey]) {
+                this._autoDownloadStates[downloadKey] = job.status;
+                this._dispatchDownloadStatus();
+            }
+
+            if(job.status === 'completed') {
                 this._rememberDownloadedChapter(job.chapter)
                     .catch(error => console.warn('Failed to remember downloaded bookmark chapter:', error));
             }
@@ -288,8 +299,12 @@ export default class BookmarkUpdateManager extends EventTarget {
         let queuedCount = 0;
         if(this._settings.autoDownloadBookmarkUpdates.value) {
             for(let chapter of missingTargetChapters) {
-                this._downloadManager.addDownload(chapter);
-                queuedCount++;
+                let added = this._downloadManager.addDownload(chapter);
+                if(added) {
+                    queuedCount++;
+                    this._autoDownloadStates[this._chapterKey(chapter)] = 'queued';
+                    this._dispatchDownloadStatus();
+                }
             }
         }
 
@@ -308,6 +323,47 @@ export default class BookmarkUpdateManager extends EventTarget {
             targetLanguageMissingCount: missingTargetChapters.length,
             queuedCount: queuedCount
         };
+    }
+
+    _chapterKey(chapter) {
+        let manga = chapter && chapter.manga;
+        let connector = manga && manga.connector;
+        return JSON.stringify([
+            connector ? connector.id : '',
+            manga ? manga.id : '',
+            chapter ? chapter.id : ''
+        ]);
+    }
+
+    _getDownloadStatus() {
+        let result = {
+            queued: 0,
+            downloading: 0,
+            completed: 0,
+            failed: 0,
+            total: 0
+        };
+
+        for(let key in this._autoDownloadStates) {
+            let status = this._autoDownloadStates[key];
+            result.total++;
+            if(status === 'queued') {
+                result.queued++;
+            } else if(status === 'downloading') {
+                result.downloading++;
+            } else if(status === 'completed') {
+                result.completed++;
+            } else if(status === 'failed') {
+                result.failed++;
+            }
+        }
+        return result;
+    }
+
+    _dispatchDownloadStatus() {
+        this.dispatchEvent(new CustomEvent('download-status', {
+            detail: this._getDownloadStatus()
+        }));
     }
 
     async _rememberDownloadedChapter(chapter) {
