@@ -94,6 +94,12 @@
             let manager = Engine.BookmarkUpdateManager;
             let status = document.querySelector('#bookmark-update-status');
             let button = document.querySelector('#bookmark-update-button');
+            let scanSummary = '북마크 업데이트 대기 중';
+            let downloadSummary = '';
+
+            let renderStatus = () => {
+                status.textContent = downloadSummary ? scanSummary + ' · ' + downloadSummary : scanSummary;
+            };
 
             let runCheck = () => {
                 if(manager.isRunning) {
@@ -101,7 +107,8 @@
                 }
                 manager.checkForUpdates({ force: true }).catch(error => {
                     button.disabled = false;
-                    status.textContent = `북마크 검사 오류: ${error.message || error}`;
+                    scanSummary = `북마크 검사 오류: ${error.message || error}`;
+                    renderStatus();
                     console.error('Bookmark update check failed:', error);
                 });
             };
@@ -112,35 +119,49 @@
                 let detail = event.detail;
                 button.disabled = true;
                 let mode = detail.force ? '전체 강제 검사' : '12시간 캐시 검사';
-                status.textContent =
+                scanSummary =
                     `북마크 업데이트 확인 중... 0 / ${detail.total}` +
                     ` · ${mode}` +
                     ` · ${detail.parallel}개 병렬` +
                     ` · ${detail.languageLabel}`;
+                renderStatus();
             });
 
             manager.addEventListener('progress', event => {
                 let detail = event.detail;
                 let result = detail.result;
                 let manga = detail.title ? ` · ${detail.title}` : '';
-                status.textContent =
+                scanSummary =
                     `북마크 ${detail.current} / ${detail.total}` +
                     ` · ${resultText(result, detail.languageLabel)}` + manga;
+                renderStatus();
             });
 
             manager.addEventListener('finished', event => {
                 let result = event.detail;
                 button.disabled = false;
-                status.textContent =
+                scanSummary =
                     `완료 · 확인 ${result.checked}` +
                     ` · ${resultText(result, result.languageLabel)}` +
                     ` · ${result.parallel}개 병렬`;
+                renderStatus();
+            });
+
+            manager.addEventListener('download-status', event => {
+                let detail = event.detail;
+                downloadSummary =
+                    `자동다운로드 큐 ${detail.queued}` +
+                    ` · 다운로드중 ${detail.downloading}` +
+                    ` · 완료 ${detail.completed}` +
+                    ` · 실패 ${detail.failed}`;
+                renderStatus();
             });
 
             if(manager.isRunning) {
                 button.disabled = true;
-                status.textContent = '북마크 업데이트 확인 중...';
+                scanSummary = '북마크 업데이트 확인 중...';
             }
+            renderStatus();
         }
 
         async function main() {
