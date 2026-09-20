@@ -39,8 +39,8 @@ jobs:
         shell: pwsh
         run: |
           $env:ELECTRON_RUN_AS_NODE = '1'
-          & '.\node_modules\electron\dist\electron.exe' scripts/test-portable-update.js
-          if ($LASTEXITCODE -ne 0) { throw 'Electron runtime updater tests failed.' }
+          $updaterTest = Start-Process -FilePath '.\node_modules\electron\dist\electron.exe' -ArgumentList 'scripts/test-portable-update.js' -NoNewWindow -Wait -PassThru
+          if ($updaterTest.ExitCode -ne 0) { throw "Electron runtime updater tests failed: $($updaterTest.ExitCode)" }
 
       - name: Build custom web application
         run: npm run build:web
