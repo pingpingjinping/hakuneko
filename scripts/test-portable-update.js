@@ -6,7 +6,7 @@ const JSZip = require('jszip');
 const childProcess = require('child_process');
 const { newer, safeEntry, extract } = require('../src/app/PortableUpdater');
 const PortableUpdater = require('../src/app/PortableUpdater');
-const { install } = require('../src/app/PortableUpdateHelper');
+const { install, main: runHelper } = require('../src/app/PortableUpdateHelper');
 
 const build = { schema: 1, runtime: 'electron-6.1.7-win32-x64', run: 200, attempt: 1, commit: 'a'.repeat(40) };
 
@@ -115,7 +115,41 @@ async function main() {
         await fs.outputFile(path.join(root, 'disable-auto-update'), '');
         assert.strictEqual(await offline.check(() => {}), false);
         assert.strictEqual(warnings, 2);
-        console.log('PASS: versions, unsafe paths, manifest mismatch, rollback, data preservation, packaging, checksum rejection, offline startup, opt-out');
+
+        // Use a live child to verify handoff: no replacement until it exits,
+        // then exactly one normal app restart with Node mode removed.
+        const helperWork = path.join(temp, 'handoff');
+        await extract(payload, path.join(helperWork, 'stage'), manifest);
+        const parent = childProcess.spawn(process.execPath, ['-e', 'process.stdout.write("ready"); setInterval(() => {}, 1000);'], {
+            env: Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: '1' }),
+            stdio: ['ignore', 'pipe', 'ignore']
+        });
+        try {
+            await new Promise((resolve, reject) => {
+                parent.stdout.once('data', resolve);
+                parent.once('error', reject);
+                parent.once('exit', () => reject(new Error('Parent fixture exited early')));
+            });
+            await fs.writeJson(path.join(helperWork, 'job.json'), { root, exe: process.execPath, pid: parent.pid });
+            let restarted = 0;
+            const running = runHelper(helperWork, (exe, args, options) => {
+                restarted++;
+                assert.strictEqual(options.env.ELECTRON_RUN_AS_NODE, undefined);
+                assert.strictEqual(options.env.HAKUNEKO_SKIP_UPDATE, '1');
+                return { on: () => {}, unref: () => {} };
+            });
+            await new Promise(resolve => setTimeout(resolve, 300));
+            assert(await fs.pathExists(path.join(helperWork, 'ready')));
+            assert.strictEqual(restarted, 0);
+            assert.deepStrictEqual(await fs.readJson(path.join(root, 'update-build.json')), build);
+            parent.kill();
+            await running;
+            assert.strictEqual(restarted, 1);
+            assert.strictEqual((await fs.readJson(path.join(root, 'update-build.json'))).run, 201);
+        } finally {
+            parent.kill();
+        }
+        console.log('PASS: versions, unsafe paths, manifest mismatch, rollback, data preservation, packaging, checksum rejection, offline startup, opt-out, parent-exit handoff');
     } finally {
         await fs.remove(temp);
     }

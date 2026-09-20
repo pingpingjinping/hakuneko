@@ -77,7 +77,7 @@ async function install(root, work, move = rename) {
     }
 }
 
-async function main(work) {
+async function main(work, launch = childProcess.spawn) {
     const config = JSON.parse(fs.readFileSync(path.join(work, 'job.json'), 'utf8'));
     // Handshake before the parent exits; never replace files while it is alive.
     fs.writeFileSync(path.join(work, 'ready'), 'ready');
@@ -110,7 +110,7 @@ async function main(work) {
     }
     const environment = Object.assign({}, process.env, { HAKUNEKO_SKIP_UPDATE: '1' });
     delete environment.ELECTRON_RUN_AS_NODE;
-    const child = childProcess.spawn(config.exe, [], {
+    const child = launch(config.exe, [], {
         cwd: config.root,
         detached: true,
         stdio: 'ignore',
@@ -120,7 +120,7 @@ async function main(work) {
     child.unref();
 }
 
-module.exports = { install };
+module.exports = { install, main };
 if(require.main === module) {
     main(process.argv[2]).catch(error => {
         fs.writeFileSync(path.join(process.argv[2], 'result'), error.stack);
