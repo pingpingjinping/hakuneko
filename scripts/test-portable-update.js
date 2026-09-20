@@ -1,8 +1,11 @@
 const assert = require('assert');
-const fs = require('fs-extra');
 const path = require('path');
+// Resolve the same pinned dependencies shipped inside app.asar, not the newer
+// build-tool dependencies at repository root (which need a newer Node).
+const appModules = { paths: [path.join(__dirname, '../src/app')] };
+const fs = require(require.resolve('fs-extra', appModules));
 const os = require('os');
-const JSZip = require('jszip');
+const JSZip = require(require.resolve('jszip', appModules));
 const childProcess = require('child_process');
 const { newer, safeEntry, extract } = require('../src/app/PortableUpdater');
 const PortableUpdater = require('../src/app/PortableUpdater');
