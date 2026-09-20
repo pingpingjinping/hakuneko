@@ -9,6 +9,8 @@ const UpdateServerManager = require('./UpdateServerManager');
 const CacheDirectoryManager = require('./CacheDirectoryManager');
 const Updater = require('./Updater');
 const ElectronBootstrap = require('./ElectronBootstrap');
+const PortableUpdater = require('./PortableUpdater');
+const electron = require('electron');
 
 const loadingPage = `
 <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); font-family: monospace; font-size: 1.25em; font-weight: bold; text-align: center; opacity: 0.33;">
@@ -69,8 +71,29 @@ module.exports = class App {
             } else {
                 delete process.env.HAKUNEKO_PORTABLE;
             }
+            const customPortable = process.platform === 'win32' && process.arch === 'x64' &&
+                Configuration.isPortableMode && process.argv.length === 1;
+            if(customPortable) {
+                electron.app.setPath('userData', this._configuration.applicationUserDataDirectory);
+                if(!electron.app.requestSingleInstanceLock()) {
+                    electron.app.exit(0);
+                    return;
+                }
+            }
             await this._electron.launch();
             await this._electron.loadHTML(loadingPage);
+            if(customPortable) {
+                const updater = new PortableUpdater(path.dirname(process.execPath), this._logger);
+                const restarting = await updater.check(message => {
+                    this._electron.loadHTML('<div style="padding:48px;font:20px sans-serif">' + message + '</div>').catch(() => {});
+                });
+                if(restarting) {
+                    // The renderer has not loaded yet; there are no download jobs.
+                    // exit bypasses the reader's close handler, which cancels quit.
+                    electron.app.exit(0);
+                    return;
+                }
+            }
             await this._updater.updateCache(this._configuration.publicKey);
             this._electron.loadURL(this._configuration.applicationStartupURL);
         } catch(error) {
