@@ -1,0 +1,103 @@
+name: Sync upstream stable
+
+on:
+  schedule:
+    - cron: '23 21 * * *' # 06:23 KST; GitHub may delay scheduled runs
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: sync-upstream-6.1.7
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'pingpingjinping/hakuneko'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: '6.1.7'
+          fetch-depth: 0
+
+      - name: Merge official stable changes locally
+        id: merge
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags https://github.com/manga-download/hakuneko.git refs/heads/6.1.7
+          upstream=$(git rev-parse FETCH_HEAD)
+          before=$(git rev-parse HEAD)
+          echo "before=$before" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor "$upstream" HEAD; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'Official 6.1.7 is already included; no code changes needed.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Stop on history rewrites or conflicts; never force or pick a side.
+          git merge-base HEAD "$upstream" >/dev/null
+          if ! git merge --no-ff --no-edit "$upstream"; then
+            git merge --abort
+            echo '::error::Upstream conflicts with the custom build. Resolve manually.'
+            exit 1
+          fi
+          # Upstream must not silently remove our feature or change automation.
+          test -s src/web/mjs/engine/BookmarkUpdateManager.mjs
+          git diff --exit-code "$before" HEAD -- .github/workflows src/app/Configuration.js src/web/mjs/engine/BookmarkUpdateManager.mjs
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          echo "Prepared official commit $upstream for validation." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v4
+        if: steps.merge.outputs.changed == 'true'
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        if: steps.merge.outputs.changed == 'true'
+        run: npm install
+
+      - name: Lint, build and test before publishing code
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run build:web
+          npm test -- --runInBand
+
+      - name: Publish validated merge without overwriting concurrent edits
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          EXPECTED_HEAD: ${{ steps.merge.outputs.before }}
+        run: |
+          set -euo pipefail
+          git fetch origin refs/heads/6.1.7
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_HEAD"
+          git push origin HEAD:refs/heads/6.1.7
+          echo "Updated 6.1.7 to $(git rev-parse HEAD)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Ensure the current branch has a portable release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # GITHUB_TOKEN pushes do not trigger push workflows. Explicit dispatch
+          # also retries a missing/failed build on the next daily no-change run.
+          current=$(git rev-parse HEAD)
+          state=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow windows-portable-release.yml --branch 6.1.7 --commit "$current" --limit 1 --json status,conclusion --jq '.[0] | if . == null then "missing" elif .status != "completed" then "active" else .conclusion end')
+          if [[ "$state" != 'success' && "$state" != 'active' ]]; then
+            gh workflow run windows-portable-release.yml --repo "$GITHUB_REPOSITORY" --ref 6.1.7
+            echo 'Requested Windows Portable Release; check that workflow for ZIP build results.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Explain failure
+        if: failure()
+        run: |
+          echo 'Sync failed. No merge is pushed unless all validation gates pass. A release dispatch failure after a successful push is retried on the next run. See the failed step above.' >> "$GITHUB_STEP_SUMMARY"
