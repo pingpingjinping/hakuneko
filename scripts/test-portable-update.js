@@ -4,6 +4,7 @@ const path = require('path');
 // build-tool dependencies at repository root (which need a newer Node).
 const appModules = { paths: [path.join(__dirname, '../src/app')] };
 const fs = require(require.resolve('fs-extra', appModules));
+const rawFS = process.versions.electron ? require('original-fs') : require('fs');
 const os = require('os');
 const JSZip = require(require.resolve('jszip', appModules));
 const childProcess = require('child_process');
@@ -48,7 +49,8 @@ async function main() {
         await reject(extract(await zip.generateAsync({ type: 'nodebuffer' }), path.join(temp, 'unsafe'), build));
         const root = path.join(temp, 'app');
         await fs.outputFile(path.join(root, 'cache/index.html'), 'old app');
-        await fs.outputFile(path.join(root, 'resources/app.asar'), 'old code');
+        await fs.ensureDir(path.join(root, 'resources'));
+        rawFS.writeFileSync(path.join(root, 'resources/app.asar'), 'old code');
         await fs.outputFile(path.join(root, 'update-build.json'), 'old build');
         await fs.outputFile(path.join(root, 'userdata/bookmarks'), 'my bookmarks');
         await fs.outputFile(path.join(root, 'Mangas/chapter.zip'), 'my download');
@@ -60,18 +62,18 @@ async function main() {
             if(++moves === 4) {
                 throw new Error('simulated sharing violation/disk failure');
             }
-            await fs.rename(from, to);
+            rawFS.renameSync(from, to);
         }));
         assert.strictEqual(await fs.readFile(path.join(root, 'cache/index.html'), 'utf8'), 'old app');
-        assert.strictEqual(await fs.readFile(path.join(root, 'resources/app.asar'), 'utf8'), 'old code');
+        assert.strictEqual(rawFS.readFileSync(path.join(root, 'resources/app.asar'), 'utf8'), 'old code');
         assert.strictEqual(await fs.readFile(path.join(root, 'update-build.json'), 'utf8'), 'old build');
         await install(root, work);
         assert.strictEqual(await fs.readFile(path.join(root, 'cache/index.html'), 'utf8'), 'new app');
-        assert.strictEqual(await fs.readFile(path.join(root, 'resources/app.asar'), 'utf8'), 'new code');
+        assert.strictEqual(rawFS.readFileSync(path.join(root, 'resources/app.asar'), 'utf8'), 'new code');
         assert.strictEqual(await fs.readFile(path.join(root, 'userdata/bookmarks'), 'utf8'), 'my bookmarks');
         assert.strictEqual(await fs.readFile(path.join(root, 'Mangas/chapter.zip'), 'utf8'), 'my download');
         assert.strictEqual(await fs.readFile(path.join(root, 'resources/other'), 'utf8'), 'leave alone');
-        assert.strictEqual(await fs.readFile(path.join(work, 'backup/resources/app.asar'), 'utf8'), 'old code');
+        assert.strictEqual(rawFS.readFileSync(path.join(work, 'backup/resources/app.asar'), 'utf8'), 'old code');
 
         // Exercise the exact build script, then consume its output with the client.
         await fs.ensureDir(path.join(temp, 'build'));
@@ -108,7 +110,7 @@ async function main() {
         });
         assert.strictEqual(await broken.check(() => {}), false);
         assert.strictEqual(warnings, 1);
-        assert.strictEqual(await fs.readFile(path.join(root, 'resources/app.asar'), 'utf8'), 'new code');
+        assert.strictEqual(rawFS.readFileSync(path.join(root, 'resources/app.asar'), 'utf8'), 'new code');
         assert.deepStrictEqual(await fs.readJson(path.join(root, 'update-build.json')), build);
         const offline = new PortableUpdater(root, logger, async () => {
             throw new Error('offline');
@@ -154,7 +156,12 @@ async function main() {
         }
         console.log('PASS: versions, unsafe paths, manifest mismatch, rollback, data preservation, packaging, checksum rejection, offline startup, opt-out, parent-exit handoff');
     } finally {
+        // Test fixtures include intentionally fake archives. Only cleanup uses
+        // this flag; production extraction/install tests retain ASAR handling.
+        const noAsar = process.noAsar;
+        process.noAsar = true;
         await fs.remove(temp);
+        process.noAsar = noAsar;
     }
 }
 

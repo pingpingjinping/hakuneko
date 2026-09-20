@@ -4,6 +4,8 @@ const https = require('https');
 const crypto = require('crypto');
 const childProcess = require('child_process');
 const JSZip = require('jszip');
+// Electron treats *.asar paths as virtual directories, even in Node mode.
+const rawFS = process.versions.electron ? require('original-fs') : require('fs');
 
 const repository = 'pingpingjinping/hakuneko';
 const channel = 'v6.1.7-bookmark-auto-update';
@@ -119,7 +121,9 @@ async function extract(buffer, stage, expected) {
         if(total > 512 * 1024 * 1024) {
             throw new Error('Expanded update exceeds size limit');
         }
-        await fs.outputFile(path.join(stage, name), data);
+        const destination = path.join(stage, name);
+        await fs.ensureDir(path.dirname(destination));
+        rawFS.writeFileSync(destination, data);
     }
     const bundled = await fs.readJson(path.join(stage, 'update-build.json'));
     if(!validBuild(bundled) || bundled.run !== expected.run || bundled.attempt !== expected.attempt || bundled.commit !== expected.commit) {

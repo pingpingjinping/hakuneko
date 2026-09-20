@@ -1,7 +1,7 @@
 // Run by the existing Electron binary with ELECTRON_RUN_AS_NODE=1.
 // Only these application paths are owned by the updater; userdata and downloads
 // are never part of the transaction. No npm modules are needed by this helper.
-const fs = require('fs');
+const fs = process.versions.electron ? require('original-fs') : require('fs');
 const path = require('path');
 const childProcess = require('child_process');
 const owned = ['cache', 'resources/app.asar', 'update-build.json'];
