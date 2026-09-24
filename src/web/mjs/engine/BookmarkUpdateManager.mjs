@@ -92,8 +92,9 @@ export default class BookmarkUpdateManager extends EventTarget {
             }
 
             let downloadKey = this._chapterKey(job.chapter);
-            if(this._autoDownloadStates[downloadKey]) {
-                this._autoDownloadStates[downloadKey] = job.status;
+            let item = this._autoDownloadStates[downloadKey];
+            if(item) {
+                item.status = job.status;
                 this._dispatchDownloadStatus();
             }
 
@@ -302,7 +303,12 @@ export default class BookmarkUpdateManager extends EventTarget {
                 let added = this._downloadManager.addDownload(chapter);
                 if(added) {
                     queuedCount++;
-                    this._autoDownloadStates[this._chapterKey(chapter)] = 'queued';
+                    this._autoDownloadStates[this._chapterKey(chapter)] = {
+                        status: 'queued',
+                        connector: bookmark.title && bookmark.title.connector ? bookmark.title.connector : connector.label,
+                        manga: bookmark.title && bookmark.title.manga ? bookmark.title.manga : manga.title,
+                        chapter: chapter.title || String(chapter.id)
+                    };
                     this._dispatchDownloadStatus();
                 }
             }
@@ -341,11 +347,13 @@ export default class BookmarkUpdateManager extends EventTarget {
             downloading: 0,
             completed: 0,
             failed: 0,
-            total: 0
+            total: 0,
+            items: []
         };
 
         for(let key in this._autoDownloadStates) {
-            let status = this._autoDownloadStates[key];
+            let item = this._autoDownloadStates[key];
+            let status = item.status;
             result.total++;
             if(status === 'queued') {
                 result.queued++;
@@ -356,6 +364,12 @@ export default class BookmarkUpdateManager extends EventTarget {
             } else if(status === 'failed') {
                 result.failed++;
             }
+            result.items.push({
+                connector: item.connector || '',
+                manga: item.manga || '',
+                chapter: item.chapter || '',
+                status: status
+            });
         }
         return result;
     }
