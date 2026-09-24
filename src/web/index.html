@@ -94,11 +94,112 @@
             let manager = Engine.BookmarkUpdateManager;
             let status = document.querySelector('#bookmark-update-status');
             let button = document.querySelector('#bookmark-update-button');
+            let downloadButton = document.querySelector('#bookmark-download-summary');
+            let downloadModal = document.querySelector('#bookmark-download-modal');
+            let downloadModalClose = document.querySelector('#bookmark-download-modal-close');
+            let downloadModalMeta = document.querySelector('#bookmark-download-modal-meta');
+            let downloadModalList = document.querySelector('#bookmark-download-modal-list');
             let scanSummary = '북마크 업데이트 대기 중';
-            let downloadSummary = '';
+            let scanFinished = false;
+            let downloadState = {
+                queued: 0,
+                downloading: 0,
+                completed: 0,
+                failed: 0,
+                total: 0,
+                items: []
+            };
 
             let renderStatus = () => {
-                status.textContent = downloadSummary ? scanSummary + ' · ' + downloadSummary : scanSummary;
+                status.textContent = scanSummary;
+            };
+
+            let getStatusLabel = value => {
+                switch(value) {
+                    case 'queued':
+                        return '대기';
+                    case 'downloading':
+                        return '다운로드 중';
+                    case 'completed':
+                        return '완료';
+                    case 'failed':
+                        return '실패';
+                    default:
+                        return value || '알 수 없음';
+                }
+            };
+
+            let renderDownloadSummary = () => {
+                if(downloadState.total > 0) {
+                    downloadButton.hidden = false;
+                    downloadButton.disabled = false;
+                    downloadButton.textContent = `이번 실행 ${downloadState.total}개 · 보기`;
+                    downloadButton.title =
+                        `자동 다운로드 ${downloadState.total}개` +
+                        ` · 대기 ${downloadState.queued}` +
+                        ` · 진행 ${downloadState.downloading}` +
+                        ` · 완료 ${downloadState.completed}` +
+                        ` · 실패 ${downloadState.failed}`;
+                } else if(scanFinished) {
+                    downloadButton.hidden = false;
+                    downloadButton.disabled = true;
+                    downloadButton.textContent = '이번 실행: 새 다운로드 없음';
+                    downloadButton.title = '이번 실행에서 자동 다운로드된 새 챕터가 없습니다.';
+                } else {
+                    downloadButton.hidden = true;
+                }
+            };
+
+            let renderDownloadDetails = () => {
+                downloadModalMeta.textContent =
+                    `총 ${downloadState.total}개` +
+                    ` · 대기 ${downloadState.queued}` +
+                    ` · 진행 ${downloadState.downloading}` +
+                    ` · 완료 ${downloadState.completed}` +
+                    ` · 실패 ${downloadState.failed}`;
+                downloadModalList.textContent = '';
+
+                for(let item of downloadState.items || []) {
+                    let row = document.createElement('div');
+                    row.className = 'bookmark-download-item';
+
+                    let text = document.createElement('div');
+                    text.className = 'bookmark-download-item-text';
+
+                    let title = document.createElement('div');
+                    title.className = 'bookmark-download-item-title';
+                    let manga = item.manga || '(작품명 없음)';
+                    let chapter = item.chapter || '(화 정보 없음)';
+                    title.textContent = manga + ' — ' + chapter;
+
+                    let connector = document.createElement('div');
+                    connector.className = 'bookmark-download-item-connector';
+                    connector.textContent = item.connector || '';
+
+                    let state = document.createElement('div');
+                    state.className = 'bookmark-download-item-state';
+                    state.textContent = getStatusLabel(item.status);
+
+                    text.appendChild(title);
+                    if(item.connector) {
+                        text.appendChild(connector);
+                    }
+                    row.appendChild(text);
+                    row.appendChild(state);
+                    downloadModalList.appendChild(row);
+                }
+            };
+
+            let closeDownloadDetails = () => {
+                downloadModal.hidden = true;
+            };
+
+            let openDownloadDetails = () => {
+                if(downloadState.total < 1) {
+                    return;
+                }
+                renderDownloadDetails();
+                downloadModal.hidden = false;
             };
 
             let runCheck = () => {
@@ -107,17 +208,32 @@
                 }
                 manager.checkForUpdates({ force: true }).catch(error => {
                     button.disabled = false;
+                    scanFinished = true;
                     scanSummary = `북마크 검사 오류: ${error.message || error}`;
                     renderStatus();
+                    renderDownloadSummary();
                     console.error('Bookmark update check failed:', error);
                 });
             };
 
             button.addEventListener('click', runCheck);
+            downloadButton.addEventListener('click', openDownloadDetails);
+            downloadModalClose.addEventListener('click', closeDownloadDetails);
+            downloadModal.addEventListener('click', event => {
+                if(event.target === downloadModal) {
+                    closeDownloadDetails();
+                }
+            });
+            document.addEventListener('keydown', event => {
+                if(event.key === 'Escape' && !downloadModal.hidden) {
+                    closeDownloadDetails();
+                }
+            });
 
             manager.addEventListener('started', event => {
                 let detail = event.detail;
                 button.disabled = true;
+                scanFinished = false;
                 let mode = detail.force ? '전체 강제 검사' : '12시간 캐시 검사';
                 scanSummary =
                     `북마크 업데이트 확인 중... 0 / ${detail.total}` +
@@ -125,6 +241,7 @@
                     ` · ${detail.parallel}개 병렬` +
                     ` · ${detail.languageLabel}`;
                 renderStatus();
+                renderDownloadSummary();
             });
 
             manager.addEventListener('progress', event => {
@@ -140,21 +257,28 @@
             manager.addEventListener('finished', event => {
                 let result = event.detail;
                 button.disabled = false;
+                scanFinished = true;
                 scanSummary =
                     `완료 · 확인 ${result.checked}` +
                     ` · ${resultText(result, result.languageLabel)}` +
                     ` · ${result.parallel}개 병렬`;
                 renderStatus();
+                renderDownloadSummary();
             });
 
             manager.addEventListener('download-status', event => {
-                let detail = event.detail;
-                downloadSummary =
-                    `자동다운로드 큐 ${detail.queued}` +
-                    ` · 다운로드중 ${detail.downloading}` +
-                    ` · 완료 ${detail.completed}` +
-                    ` · 실패 ${detail.failed}`;
-                renderStatus();
+                downloadState = Object.assign({
+                    queued: 0,
+                    downloading: 0,
+                    completed: 0,
+                    failed: 0,
+                    total: 0,
+                    items: []
+                }, event.detail || {});
+                renderDownloadSummary();
+                if(!downloadModal.hidden) {
+                    renderDownloadDetails();
+                }
             });
 
             if(manager.isRunning) {
@@ -162,6 +286,7 @@
                 scanSummary = '북마크 업데이트 확인 중...';
             }
             renderStatus();
+            renderDownloadSummary();
         }
 
         async function main() {
@@ -244,6 +369,29 @@
             max-height: 2.7em;
         }
 
+        #bookmark-download-summary {
+            flex: none;
+            max-width: 12.5em;
+            padding: 0.35em 0.55em;
+            overflow: hidden;
+            border: 1px solid #777777;
+            border-radius: 0.25em;
+            background: transparent;
+            color: #ffffff;
+            cursor: pointer;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        #bookmark-download-summary:disabled {
+            cursor: default;
+            opacity: 0.65;
+        }
+
+        #bookmark-download-summary[hidden] {
+            display: none;
+        }
+
         #bookmark-update-button {
             flex: none;
             padding: 0.35em 0.6em;
@@ -258,6 +406,109 @@
             cursor: default;
             opacity: 0.55;
         }
+
+        #bookmark-download-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5em;
+            box-sizing: border-box;
+            background: rgba(0, 0, 0, 0.58);
+            font: 13px sans-serif;
+            z-index: 10000;
+        }
+
+        #bookmark-download-modal[hidden] {
+            display: none;
+        }
+
+        .bookmark-download-dialog {
+            width: calc(100% - 3em);
+            max-width: 42em;
+            max-height: calc(100% - 3em);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #555555;
+            border-radius: 0.45em;
+            background: #202020;
+            color: #ffffff;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.55);
+        }
+
+        .bookmark-download-dialog-header {
+            display: flex;
+            align-items: center;
+            padding: 0.8em 1em;
+            border-bottom: 1px solid #444444;
+            font-size: 1.1em;
+        }
+
+        .bookmark-download-dialog-header strong {
+            flex: 1;
+        }
+
+        #bookmark-download-modal-close {
+            flex: none;
+            border: 0;
+            background: transparent;
+            color: #ffffff;
+            cursor: pointer;
+            font-size: 1.35em;
+            line-height: 1;
+        }
+
+        #bookmark-download-modal-meta {
+            padding: 0.7em 1em;
+            color: #cccccc;
+            border-bottom: 1px solid #3a3a3a;
+        }
+
+        #bookmark-download-modal-list {
+            overflow-y: auto;
+        }
+
+        .bookmark-download-item {
+            display: flex;
+            align-items: center;
+            gap: 1em;
+            padding: 0.75em 1em;
+            border-bottom: 1px solid #333333;
+        }
+
+        .bookmark-download-item:last-child {
+            border-bottom: 0;
+        }
+
+        .bookmark-download-item-text {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .bookmark-download-item-title {
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .bookmark-download-item-connector {
+            margin-top: 0.2em;
+            overflow: hidden;
+            color: #aaaaaa;
+            font-size: 0.9em;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .bookmark-download-item-state {
+            flex: none;
+            color: #dddddd;
+        }
     </style>
 </head>
 <body>
@@ -268,7 +519,18 @@
     </div>
     <div id="bookmark-update-panel">
         <span id="bookmark-update-status">북마크 업데이트 대기 중 · 설정에서 병렬 수/언어 변경 가능</span>
+        <button id="bookmark-download-summary" type="button" hidden>이번 실행: 새 다운로드 없음</button>
         <button id="bookmark-update-button" type="button">지금 확인</button>
+    </div>
+    <div id="bookmark-download-modal" hidden>
+        <div class="bookmark-download-dialog">
+            <div class="bookmark-download-dialog-header">
+                <strong>이번 실행 자동 다운로드</strong>
+                <button id="bookmark-download-modal-close" type="button" title="닫기">×</button>
+            </div>
+            <div id="bookmark-download-modal-meta"></div>
+            <div id="bookmark-download-modal-list"></div>
+        </div>
     </div>
 </body>
 </html>
