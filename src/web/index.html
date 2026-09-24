@@ -100,7 +100,6 @@
             let downloadModalMeta = document.querySelector('#bookmark-download-modal-meta');
             let downloadModalList = document.querySelector('#bookmark-download-modal-list');
             let scanSummary = '북마크 업데이트 대기 중';
-            let scanFinished = false;
             let downloadState = {
                 queued: 0,
                 downloading: 0,
@@ -199,8 +198,7 @@
                 }
                 manager.checkForUpdates({ force: true }).catch(error => {
                     button.disabled = false;
-                    scanFinished = true;
-                    scanSummary = `북마크 검사 오류: ${error.message || error}`;
+                        scanSummary = `북마크 검사 오류: ${error.message || error}`;
                     renderStatus();
                     renderDownloadSummary();
                     console.error('Bookmark update check failed:', error);
@@ -224,7 +222,6 @@
             manager.addEventListener('started', event => {
                 let detail = event.detail;
                 button.disabled = true;
-                scanFinished = false;
                 let mode = detail.force ? '전체 강제 검사' : '12시간 캐시 검사';
                 scanSummary =
                     `북마크 업데이트 확인 중... 0 / ${detail.total}` +
@@ -248,7 +245,6 @@
             manager.addEventListener('finished', event => {
                 let result = event.detail;
                 button.disabled = false;
-                scanFinished = true;
                 scanSummary =
                     `완료 · 확인 ${result.checked}` +
                     ` · ${resultText(result, result.languageLabel)}` +
