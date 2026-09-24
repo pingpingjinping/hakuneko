@@ -133,20 +133,11 @@
                 if(downloadState.total > 0) {
                     downloadButton.hidden = false;
                     downloadButton.disabled = false;
-                    downloadButton.textContent = `이번 실행 ${downloadState.total}개 · 보기`;
-                    downloadButton.title =
-                        `자동 다운로드 ${downloadState.total}개` +
-                        ` · 대기 ${downloadState.queued}` +
-                        ` · 진행 ${downloadState.downloading}` +
-                        ` · 완료 ${downloadState.completed}` +
-                        ` · 실패 ${downloadState.failed}`;
-                } else if(scanFinished) {
-                    downloadButton.hidden = false;
-                    downloadButton.disabled = true;
-                    downloadButton.textContent = '이번 실행: 새 다운로드 없음';
-                    downloadButton.title = '이번 실행에서 자동 다운로드된 새 챕터가 없습니다.';
+                    downloadButton.textContent = '목록';
+                    downloadButton.title = '이번 실행 자동 다운로드 목록 보기';
                 } else {
                     downloadButton.hidden = true;
+                    downloadButton.disabled = true;
                 }
             };
 
@@ -371,7 +362,6 @@
 
         #bookmark-download-summary {
             flex: none;
-            max-width: 12.5em;
             padding: 0.35em 0.55em;
             overflow: hidden;
             border: 1px solid #777777;
@@ -519,7 +509,7 @@
     </div>
     <div id="bookmark-update-panel">
         <span id="bookmark-update-status">북마크 업데이트 대기 중 · 설정에서 병렬 수/언어 변경 가능</span>
-        <button id="bookmark-download-summary" type="button" hidden>이번 실행: 새 다운로드 없음</button>
+        <button id="bookmark-download-summary" type="button" hidden>목록</button>
         <button id="bookmark-update-button" type="button">지금 확인</button>
     </div>
     <div id="bookmark-download-modal" hidden>
