@@ -363,8 +363,8 @@ export default class Settings extends EventTarget {
                         && data.connectors[connector.id][key] !== undefined
                         && connector.config[key]
                         && connector.config[key].input) {
-                    connector.config[key].value = this._getDecryptedValue(connector.config[key].input, data.connectors[connector.id][key]);
-                    connector.config[key].value = this._getValidValue(connector.label, connector.config[key], true);
+                        connector.config[key].value = this._getDecryptedValue(connector.config[key].input, data.connectors[connector.id][key]);
+                        connector.config[key].value = this._getValidValue(connector.label, connector.config[key], true);
                     }
                 }
             }

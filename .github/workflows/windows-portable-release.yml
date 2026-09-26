@@ -5,9 +5,15 @@ on:
     branches:
       - 6.1.7
   workflow_dispatch:
+  pull_request:
+    branches: ['6.1.7']
 
 permissions:
   contents: write
+
+concurrency:
+  group: windows-portable-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-release:
@@ -25,6 +31,16 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Test portable updater
+        run: node scripts/test-portable-update.js
+
+      - name: Test with the packaged Electron Node runtime
+        shell: pwsh
+        run: |
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          $updaterTest = Start-Process -FilePath '.\node_modules\electron\dist\electron.exe' -ArgumentList 'scripts/test-portable-update.js' -NoNewWindow -Wait -PassThru
+          if ($updaterTest.ExitCode -ne 0) { throw "Electron runtime updater tests failed: $($updaterTest.ExitCode)" }
 
       - name: Build custom web application
         run: npm run build:web
@@ -65,10 +81,14 @@ jobs:
           New-Item -ItemType Directory -Path $cacheDir | Out-Null
           Copy-Item -Path 'build\web\*' -Destination $cacheDir -Recurse -Force
 
+          node scripts/build-portable-update.js $portableDir.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Update package generation failed.' }
+
           $zipPath = "$($portableDir.FullName).zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
           Push-Location (Split-Path $portableDir.FullName -Parent)
           7z a $zipPath ".\$($portableDir.Name)" | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP generation failed.' }
           Pop-Location
 
       - name: Locate portable amd64 archive
@@ -81,6 +101,7 @@ jobs:
           "name=$($asset.Name)" >> $env:GITHUB_OUTPUT
 
       - name: Create or update release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/6.1.7'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -97,6 +118,7 @@ jobs:
           - Update state is stored separately from the existing bookmark file
           - Custom web app is bundled into the portable package
           - Upstream web auto-update is disabled by default so the custom feature is not overwritten
+          - On startup, this portable build checks this repository for verified custom application updates
 
           Portable user data remains inside the package folder under userdata.
           "@
@@ -107,3 +129,12 @@ jobs:
           }
 
           gh release upload $env:TAG $env:ASSET --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Portable upload failed.' }
+
+          # Immutable payload first; manifest last. Old manifests continue to
+          # reference available files while a new release is being published.
+          $payload = "build/hakuneko-update-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.zip"
+          gh release upload $env:TAG $payload --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Update payload upload failed.' }
+          gh release upload $env:TAG 'build/custom-update.json' --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Update manifest upload failed.' }

@@ -19,11 +19,11 @@
     "eslint": "^8.57.0",
     "fs-extra": "latest",
     "innosetup-compiler": "latest",
-    "jest": "latest",
-    "jest-junit": "latest",
+    "jest": "29.7.0",
+    "jest-junit": "16.0.0",
     "jszip": "latest",
     "polymer-build": "latest",
-    "puppeteer-core": "latest",
+    "puppeteer-core": "1.20.0",
     "rcedit": "latest",
     "win-7zip": "latest"
   },
@@ -41,9 +41,9 @@
     "build:app": "node build-app.js",
     "build:web": "node build-web.js",
     "deploy:web": "npm run build:web && node deploy-web.js",
-    "test": "jest --color --reporters=default --reporters=jest-junit",
+    "test": "node scripts/run-tests.js",
     "test:app": "jest --color --reporters=default --reporters=jest-junit --testPathPattern=/src/app",
     "test:web": "jest --color --reporters=default --reporters=jest-junit --testPathPattern=/src/web",
-    "test:e2e": "jest --color --reporters=default --reporters=jest-junit --testPathPattern=/src/__tests__"
+    "test:e2e": "jest --config jest.live.config.js --runInBand"
   }
 }

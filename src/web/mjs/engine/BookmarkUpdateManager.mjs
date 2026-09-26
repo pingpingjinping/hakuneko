@@ -184,7 +184,7 @@ export default class BookmarkUpdateManager extends EventTarget {
             };
 
             let worker = async () => {
-                while(true) {
+                for(;;) {
                     let index = nextIndex++;
                     if(index >= bookmarks.length) {
                         return;
