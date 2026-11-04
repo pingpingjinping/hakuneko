@@ -13,15 +13,16 @@ function loadMangaDex() {
         .replace('export default class MangaDex extends Connector', 'class MangaDex extends Connector');
     class TestConnector {
         constructor() {
-            this.requestOptions = { headers: { set() {} } };
+            this.requestOptions = { headers: new Headers() };
         }
         wait() {
             return Promise.resolve();
         }
     }
     class TestRequest {
-        constructor(url) {
+        constructor(url, options) {
             this.url = String(url);
+            this.headers = options && options.headers;
         }
     }
     return new Function('Connector', 'Manga', 'Request', 'URL',
@@ -62,6 +63,33 @@ describe('MangaDex PoW protection and chapter failure recovery', () => {
         expect(source).toContain("location.hostname === 'mangadex.org'");
         expect(source).toContain("document.querySelector('div#results-inprogress')");
         expect(source).toMatch(/div#results-inprogress[\s\S]*?handleAutomaticRedirect\(\)/);
+    });
+
+    test('MangaDex initialisation does not block on the protected website UI', async () => {
+        const connector = new MangaDex();
+        const oldEngine = global.Engine;
+        global.Engine = { Request: { fetchUI: jest.fn() } };
+        try {
+            await connector._initializeConnector();
+            expect(global.Engine.Request.fetchUI).not.toHaveBeenCalled();
+        } finally {
+            global.Engine = oldEngine;
+        }
+    });
+
+    test('API requests use HaruNeko identity without leaking it to image requests', () => {
+        const connector = new MangaDex();
+        const request = connector._createAPIRequest('https://api.mangadex.org/chapter');
+        expect(request.headers.get('x-user-agent')).toBe('Hakuneko 10.0');
+        expect(request.headers.get('accept')).toBe('application/json');
+        expect(connector.requestOptions.headers.has('x-user-agent')).toBe(false);
+        expect(connector.requestOptions.headers.has('x-sec-ch-ua')).toBe(false);
+    });
+
+    test('the cached manga catalogue validates response structure', async () => {
+        const connector = new MangaDex();
+        connector.fetchJSON = jest.fn().mockResolvedValue({ status: 'not a list' });
+        await expect(connector._getMangas()).rejects.toThrow('title catalogue returned invalid data');
     });
 
     test('an empty valid API feed means zero chapters, not an API error', async () => {
