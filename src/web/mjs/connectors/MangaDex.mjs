@@ -45,7 +45,7 @@ export default class MangaDex extends Connector {
         this.serverNetwork.push('https://cache.ayaya.red/mdah/data/');
         console.log(`Added Network Seeds '[ ${this.serverNetwork.join(', ')} ]' to ${this.label}`);
         const request = new Request(this.url, this.requestOptions);
-        return Engine.Request.fetchUI(request, '');
+        return Engine.Request.fetchUI(request, '', 60000, true);
     }
 
     canHandleURI(uri) {
@@ -64,7 +64,7 @@ export default class MangaDex extends Connector {
         const regexGUID = /[a-fA-F0-9]{8}-([a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12}/;
         const id = (uri.pathname.match(regexGUID) || uri.hash.match(regexGUID))[0].toLowerCase();
         const request = new Request(new URL('/manga/' + id, this.api), this.requestOptions);
-        const {data} = await this.fetchJSON(request);
+        const {data} = await this._fetchApiJSON(request);
         return new Manga(this, id, data.attributes.title.en || Object.values(data.attributes.title).shift());
     }
 
@@ -75,6 +75,27 @@ export default class MangaDex extends Connector {
                 title: manga.title,
             };
         });
+    }
+
+    /**
+     * Distinguish API/anti-bot failures from a legitimate empty chapter feed.
+     */
+    async _fetchApiJSON(request, retries = 3) {
+        try {
+            const response = await this.fetchJSON(request, retries);
+            if(response && Array.isArray(response.errors) && response.errors.length > 0) {
+                throw new Error('MangaDex API errors: ' + response.errors.map(error =>
+                    error.detail || error.title || error.message || 'unknown error'
+                ).join('; '));
+            }
+            return response;
+        } catch(error) {
+            const message = error && error.message ? error.message : String(error);
+            if(/status:\s*(403|429|503)\b/.test(message) || (error && error.name === 'SyntaxError')) {
+                throw new Error('MangaDex API access failed (possible Cloudflare/PoW challenge or rate limiting): ' + message);
+            }
+            throw error;
+        }
     }
 
     async _getChapters(manga) {
@@ -97,7 +118,11 @@ export default class MangaDex extends Connector {
         uri.searchParams.append('contentRating[]', 'pornographic');
         uri.searchParams.set('manga', manga.id);
         const request = new Request(uri, this.requestOptions);
-        const {data} = await this.fetchJSON(request, 3);
+        const response = await this._fetchApiJSON(request, 3);
+        if(!response || !Array.isArray(response.data)) {
+            throw new Error('MangaDex API returned an invalid chapter list, not zero chapters.');
+        }
+        const data = response.data;
         const groupMap = await this._getScanlationGroups(data);
         return !data ? [] : data.map(result => {
             let title = '';
@@ -133,7 +158,10 @@ export default class MangaDex extends Connector {
     async _getPages(chapter) {
         const uri = new URL('/at-home/server/' + chapter.id, this.api);
         const request = new Request(uri, this.requestOptions);
-        const data = await this.fetchJSON(request, 3);
+        const data = await this._fetchApiJSON(request, 3);
+        if(!data || !data.chapter || !Array.isArray(data.chapter.data) || !data.baseUrl) {
+            throw new Error('MangaDex API returned invalid page data.');
+        }
         return data.chapter.data.map(file => this.createConnectorURI({
             networkNode: data.baseUrl + '/data/', // e.g. 'https://foo.bar.mangadex.network:44300/token/data/'
             hash: data.chapter.hash, // e.g. '1c41e55e32b21321ff11907469e5c323'
@@ -174,8 +202,11 @@ export default class MangaDex extends Connector {
             const uri = new URL('/group', this.api);
             uri.search = new URLSearchParams([ [ 'limit', 100 ], ...groupIDs.map(id => [ 'ids[]', id ]) ]).toString();
             const request = new Request(uri, this.requestOptions);
-            const {data} = await this.fetchJSON(request, 3);
-            data.forEach(result => groupList[result.id] = result.attributes.name || 'unknown');
+            const response = await this._fetchApiJSON(request, 3);
+            if(!response || !Array.isArray(response.data)) {
+                throw new Error('MangaDex API returned an invalid scanlation group list.');
+            }
+            response.data.forEach(result => groupList[result.id] = result.attributes.name || 'unknown');
         }
         return groupList;
     }
