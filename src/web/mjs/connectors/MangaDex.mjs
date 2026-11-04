@@ -91,7 +91,7 @@ export default class MangaDex extends Connector {
             return response;
         } catch(error) {
             const message = error && error.message ? error.message : String(error);
-            if(/status:\s*(403|429|503)\b/.test(message) || (error && error.name === 'SyntaxError')) {
+            if(/status:\s*(403|429|503)\b/.test(message) || error && error.name === 'SyntaxError') {
                 throw new Error('MangaDex API access failed (possible Cloudflare/PoW challenge or rate limiting): ' + message);
             }
             throw error;
