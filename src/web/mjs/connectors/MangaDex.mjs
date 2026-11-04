@@ -11,7 +11,7 @@ export default class MangaDex extends Connector {
         this.url = 'https://mangadex.org';
         this.api = 'https://api.mangadex.org';
         this.requestOptions.headers.set('x-referer', this.url);
-        this.requestOptions.headers.set('x-sec-ch-ua', '" Not A;Brand";v="99", "Chromium";v="96", "Google Chrome";v="96"');
+        // Do not send fake Chromium client hints that disagree with this old Electron runtime.
         this.config = {
             throttleRequests: {
                 label: 'Throttle API Requests [ms]',
@@ -44,8 +44,10 @@ export default class MangaDex extends Connector {
         //this.serverNetwork.push('https://bddhaec337xvm.xnvda7fch4zhr.mangadex.network/data/');
         this.serverNetwork.push('https://cache.ayaya.red/mdah/data/');
         console.log(`Added Network Seeds '[ ${this.serverNetwork.join(', ')} ]' to ${this.label}`);
-        const request = new Request(this.url, this.requestOptions);
-        return Engine.Request.fetchUI(request, '', 60000, true);
+        // MangaDex exposes its public manga and chapter metadata via separate JSON endpoints.
+        // Loading the website in Electron 6 here can stall at "Browser verification" even
+        // when the JSON API is reachable. Let API calls report their own actual failures.
+        return Promise.resolve();
     }
 
     canHandleURI(uri) {
@@ -59,22 +61,38 @@ export default class MangaDex extends Connector {
         ].some(regex => regex.test(uri.href));
     }
 
+    _createAPIRequest(uri) {
+        // The current HaruNeko connector identifies itself for MangaDex API calls.
+        // HakuNeko 6 maps x-user-agent to the actual User-Agent in Request.mjs.
+        // Apply this only to JSON API calls, not to image CDN or cached title downloads.
+        const options = Object.assign({}, this.requestOptions, {
+            headers: new Headers(this.requestOptions.headers)
+        });
+        options.headers.set('x-user-agent', 'Hakuneko 10.0');
+        options.headers.set('accept', 'application/json');
+        return new Request(uri, options);
+    }
+
     async _getMangaFromURI(uri) {
         // NOTE: The MangaDex website is still down, but there are some provisional frontends which can be used for search, copy & paste
         const regexGUID = /[a-fA-F0-9]{8}-([a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12}/;
         const id = (uri.pathname.match(regexGUID) || uri.hash.match(regexGUID))[0].toLowerCase();
-        const request = new Request(new URL('/manga/' + id, this.api), this.requestOptions);
+        const request = this._createAPIRequest(new URL('/manga/' + id, this.api));
         const {data} = await this._fetchApiJSON(request);
         return new Manga(this, id, data.attributes.title.en || Object.values(data.attributes.title).shift());
     }
 
     async _getMangas() {
-        return (await this.fetchJSON('https://websites.hakuneko.download/mangadex.json')).map(manga => {
-            return {
-                id: manga.id,
-                title: manga.title,
-            };
-        });
+        // The full title catalogue uses a cache service, not the MangaDex API.
+        // Keep this distinct from chapter API failures and do not erase existing lists.
+        const catalogue = await this.fetchJSON('https://websites.hakuneko.download/mangadex.json');
+        if(!Array.isArray(catalogue)) {
+            throw new Error('MangaDex title catalogue returned invalid data from websites.hakuneko.download.');
+        }
+        return catalogue.map(manga => ({
+            id: manga.id,
+            title: manga.title
+        }));
     }
 
     /**
@@ -117,7 +135,7 @@ export default class MangaDex extends Connector {
         uri.searchParams.append('contentRating[]', 'erotica');
         uri.searchParams.append('contentRating[]', 'pornographic');
         uri.searchParams.set('manga', manga.id);
-        const request = new Request(uri, this.requestOptions);
+        const request = this._createAPIRequest(uri);
         const response = await this._fetchApiJSON(request, 3);
         if(!response || !Array.isArray(response.data)) {
             throw new Error('MangaDex API returned an invalid chapter list, not zero chapters.');
@@ -157,7 +175,7 @@ export default class MangaDex extends Connector {
 
     async _getPages(chapter) {
         const uri = new URL('/at-home/server/' + chapter.id, this.api);
-        const request = new Request(uri, this.requestOptions);
+        const request = this._createAPIRequest(uri);
         const data = await this._fetchApiJSON(request, 3);
         if(!data || !data.chapter || !Array.isArray(data.chapter.data) || !data.baseUrl) {
             throw new Error('MangaDex API returned invalid page data.');
@@ -201,7 +219,7 @@ export default class MangaDex extends Connector {
             await this.wait(this.config.throttleRequests.value);
             const uri = new URL('/group', this.api);
             uri.search = new URLSearchParams([ [ 'limit', 100 ], ...groupIDs.map(id => [ 'ids[]', id ]) ]).toString();
-            const request = new Request(uri, this.requestOptions);
+            const request = this._createAPIRequest(uri);
             const response = await this._fetchApiJSON(request, 3);
             if(!response || !Array.isArray(response.data)) {
                 throw new Error('MangaDex API returned an invalid scanlation group list.');
