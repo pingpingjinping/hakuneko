@@ -151,6 +151,11 @@ export default class Manga extends EventTarget {
             .catch( error => {
                 // TODO: remove log ... ?
                 console.warn( '_getUpdatedChaptersFromWebsite', error );
+                // Failed MangaDex API/challenge requests must not be interpreted as zero chapters.
+                // Preserve legacy fallback behavior for unrelated connectors.
+                if(this.connector && this.connector.id === 'mangadex') {
+                    throw error;
+                }
                 return Promise.resolve( this.chapterCache || [] );
             } );
     }

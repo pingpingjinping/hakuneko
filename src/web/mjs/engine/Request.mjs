@@ -146,6 +146,12 @@ export default class Request {
                 }
                 
                 // CloudFlare Checks
+                // MangaDex's PoW page redirects automatically after the challenge completes.
+                // Do not treat the challenge page as a successfully loaded site.
+                if(location.hostname === 'mangadex.org' &&
+                    document.querySelector('div#results-inprogress')) {
+                    return handleAutomaticRedirect();
+                }
                 let cfCode = document.querySelector('.cf-error-code');
                 if(cfCode) {
                     return handleError('CloudFlare Error ' + cfCode.innerText);

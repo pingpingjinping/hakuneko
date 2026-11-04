@@ -246,8 +246,11 @@
                 let result = event.detail;
                 button.disabled = false;
                 scanFinished = true;
+                let completionLabel = result.failed
+                    ? (result.checked ? '완료 · 일부 실패' : '검사 실패')
+                    : '완료';
                 scanSummary =
-                    `완료 · 확인 ${result.checked}` +
+                    `${completionLabel} · 확인 ${result.checked}` +
                     ` · ${resultText(result, result.languageLabel)}` +
                     ` · ${result.parallel}개 병렬`;
                 renderStatus();

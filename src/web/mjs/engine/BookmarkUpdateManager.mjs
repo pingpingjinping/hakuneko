@@ -164,6 +164,11 @@ export default class BookmarkUpdateManager extends EventTarget {
                         result.queued += update.queuedCount;
                     } catch(error) {
                         result.failed++;
+                        // Preserve chapter and download IDs but retry failed MangaDex
+                        // requests on the next scan instead of retaining a fresh timestamp.
+                        if(bookmark.key && bookmark.key.connector === 'mangadex' && previous) {
+                            previous.checkedAt = null;
+                        }
                         console.warn('Failed to check bookmark for updates:', bookmark, error);
                     }
                 }
