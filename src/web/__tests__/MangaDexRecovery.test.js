@@ -181,4 +181,77 @@ describe('MangaDex PoW protection and chapter failure recovery', () => {
             warning.mockRestore();
         }
     });
+
+    test('prefers the chapter-specific MangaDex@Home server over the legacy uploads host', async () => {
+        const connector = new MangaDex();
+        const originalFetch = global.fetch;
+        connector._blobToBuffer = jest.fn(data => Promise.resolve(data));
+        global.fetch = jest.fn(async request => ({
+            ok: true,
+            status: 200,
+            headers: { get: () => '4' },
+            blob: async () => ({ size: 4 })
+        }));
+        try {
+            await expect(connector._handleConnectorURI({
+                networkNode: 'https://node.mangadex.network/data/',
+                hash: 'chapter-hash',
+                file: '1.png'
+            })).resolves.toEqual({ size: 4 });
+            expect(global.fetch.mock.calls.map(([request]) => request.url)).toEqual([
+                'https://node.mangadex.network/data/chapter-hash/1.png'
+            ]);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    test('a failed at-home node falls back instead of aborting on a network exception', async () => {
+        const connector = new MangaDex();
+        connector.serverNetwork = ['https://fallback.example/data/'];
+        const originalFetch = global.fetch;
+        connector._blobToBuffer = jest.fn(data => Promise.resolve(data));
+        global.fetch = jest.fn()
+            .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                headers: { get: () => '5' },
+                blob: async () => ({ size: 5 })
+            });
+        try {
+            await expect(connector._handleConnectorURI({
+                networkNode: 'https://node.mangadex.network/data/',
+                hash: 'chapter-hash',
+                file: '2.png'
+            })).resolves.toEqual({ size: 5 });
+            expect(global.fetch.mock.calls.map(([request]) => request.url)).toEqual([
+                'https://node.mangadex.network/data/chapter-hash/2.png',
+                'https://fallback.example/data/chapter-hash/2.png'
+            ]);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    test('reports image-server errors when all MangaDex mirrors fail', async () => {
+        const connector = new MangaDex();
+        connector.serverNetwork = ['https://fallback.example/data/'];
+        const originalFetch = global.fetch;
+        global.fetch = jest.fn()
+            .mockResolvedValueOnce({
+                ok: false,
+                status: 403
+            })
+            .mockRejectedValueOnce(new TypeError('DNS lookup failed'));
+        try {
+            await expect(connector._handleConnectorURI({
+                networkNode: 'https://node.mangadex.network/data/',
+                hash: 'chapter-hash',
+                file: '3.png'
+            })).rejects.toThrow(/HTTP 403.*DNS lookup failed/);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
 });
