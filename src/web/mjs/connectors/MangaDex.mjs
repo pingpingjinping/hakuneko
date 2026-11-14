@@ -40,9 +40,8 @@ export default class MangaDex extends Connector {
     }
 
     async _initializeConnector() {
-        //this.serverNetwork.push('https://reh3tgm2rs8sr.xnvda7fch4zhr.mangadex.network/data/');
-        //this.serverNetwork.push('https://bddhaec337xvm.xnvda7fch4zhr.mangadex.network/data/');
-        this.serverNetwork.push('https://cache.ayaya.red/mdah/data/');
+        // MangaDex@Home's chapter-specific baseUrl is authoritative. The old
+        // cache.ayaya.red mirror no longer resolves and must not be preferred.
         console.log(`Added Network Seeds '[ ${this.serverNetwork.join(', ')} ]' to ${this.label}`);
         // MangaDex exposes its public manga and chapter metadata via separate JSON endpoints.
         // Loading the website in Electron 6 here can stall at "Browser verification" even
@@ -188,13 +187,14 @@ export default class MangaDex extends Connector {
     }
 
     async _handleConnectorURI(payload) {
-        const servers = [
-            ...this.serverNetwork,
-            payload.networkNode
-        ];
+        // Always try the fresh URL returned by /at-home/server/{chapterId}
+        // before any legacy fallback. The hardcoded uploads host may return 403.
+        const servers = [payload.networkNode, ...this.serverNetwork]
+            .filter((node, index, all) => node && all.indexOf(node) === index);
+        const failures = [];
         for(let node of servers) {
+            const uri = new URL(node + payload.hash + '/' + payload.file);
             try {
-                const uri = new URL(node + payload.hash + '/' + payload.file);
                 const request = new Request(uri, this.requestOptions);
                 const response = await fetch(request);
                 if(response.ok && response.status === 200) {
@@ -202,10 +202,17 @@ export default class MangaDex extends Connector {
                     if(response.headers.get('content-length') == data.size || await createImageBitmap(data)) {
                         return this._blobToBuffer(data);
                     }
+                    failures.push(uri.host + ': invalid image response');
+                } else {
+                    failures.push(uri.host + ': HTTP ' + response.status);
                 }
-            } finally {/**/}
+            } catch(error) {
+                // A DNS, network, or image decoding error must not prevent
+                // the next MangaDex@Home mirror from being attempted.
+                failures.push(uri.host + ': ' + (error.message || String(error)));
+            }
         }
-        throw new Error('Failed to download image file from MangaDex@Home network!\n' + payload.networkNode);
+        throw new Error('Failed to download image file from MangaDex@Home network!\n' + failures.join('; '));
     }
 
     async _getScanlationGroups(chapters) {
